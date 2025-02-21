@@ -92,18 +92,20 @@ static void Key_History_Init(void)
 
 static void Key_History_Shutdown(void)
 {
-	// TODO write history to a file
-
 // not necessary for mobile
 #ifndef DP_MOBILETOUCH
 	qfile_t *historyfile = FS_OpenRealFile("darkplaces_history.txt", "w", false);
 	if(historyfile)
 	{
 		int i;
+
+		Con_Print("Saving command history to darkplaces_history.txt ...\n");
 		for(i = 0; i < CONBUFFER_LINES_COUNT(&history); ++i)
 			FS_Printf(historyfile, "%s\n", ConBuffer_GetLine(&history, i));
 		FS_Close(historyfile);
 	}
+	else
+		Con_Print(CON_ERROR "Couldn't write darkplaces_history.txt\n");
 #endif
 
 	ConBuffer_Shutdown(&history);
@@ -127,7 +129,7 @@ static qbool Key_History_Get_foundCommand(void)
 {
 	if (!history_matchfound)
 		return false;
-	strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+	dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 	key_linepos = (int)strlen(key_line);
 	history_matchfound = false;
 	return true;
@@ -136,7 +138,7 @@ static qbool Key_History_Get_foundCommand(void)
 static void Key_History_Up(void)
 {
 	if(history_line == -1) // editing the "new" line
-		strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
+		dp_strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
 
 	if (Key_History_Get_foundCommand())
 		return;
@@ -146,14 +148,14 @@ static void Key_History_Up(void)
 		history_line = CONBUFFER_LINES_COUNT(&history) - 1;
 		if(history_line != -1)
 		{
-			strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+			dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 			key_linepos = (int)strlen(key_line);
 		}
 	}
 	else if(history_line > 0)
 	{
 		--history_line; // this also does -1 -> 0, so it is good
-		strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+		dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 		key_linepos = (int)strlen(key_line);
 	}
 }
@@ -169,12 +171,12 @@ static void Key_History_Down(void)
 	if(history_line < CONBUFFER_LINES_COUNT(&history) - 1)
 	{
 		++history_line;
-		strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+		dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 	}
 	else
 	{
 		history_line = -1;
-		strlcpy(key_line + 1, history_savedline, sizeof(key_line) - 1);
+		dp_strlcpy(key_line + 1, history_savedline, sizeof(key_line) - 1);
 	}
 
 	key_linepos = (int)strlen(key_line);
@@ -183,12 +185,12 @@ static void Key_History_Down(void)
 static void Key_History_First(void)
 {
 	if(history_line == -1) // editing the "new" line
-		strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
+		dp_strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
 
 	if (CONBUFFER_LINES_COUNT(&history) > 0)
 	{
 		history_line = 0;
-		strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+		dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 		key_linepos = (int)strlen(key_line);
 	}
 }
@@ -196,12 +198,12 @@ static void Key_History_First(void)
 static void Key_History_Last(void)
 {
 	if(history_line == -1) // editing the "new" line
-		strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
+		dp_strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
 
 	if (CONBUFFER_LINES_COUNT(&history) > 0)
 	{
 		history_line = CONBUFFER_LINES_COUNT(&history) - 1;
-		strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
+		dp_strlcpy(key_line + 1, ConBuffer_GetLine(&history, history_line), sizeof(key_line) - 1);
 		key_linepos = (int)strlen(key_line);
 	}
 }
@@ -214,11 +216,11 @@ static void Key_History_Find_Backwards(void)
 	size_t digits = strlen(va(vabuf, sizeof(vabuf), "%i", HIST_MAXLINES));
 
 	if (history_line == -1) // editing the "new" line
-		strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
+		dp_strlcpy(history_savedline, key_line + 1, sizeof(history_savedline));
 
 	if (strcmp(key_line + 1, history_searchstring)) // different string? Start a new search
 	{
-		strlcpy(history_searchstring, key_line + 1, sizeof(history_searchstring));
+		dp_strlcpy(history_searchstring, key_line + 1, sizeof(history_searchstring));
 		i = CONBUFFER_LINES_COUNT(&history) - 1;
 	}
 	else if (history_line == -1)
@@ -253,7 +255,7 @@ static void Key_History_Find_Forwards(void)
 
 	if (strcmp(key_line + 1, history_searchstring)) // different string? Start a new search
 	{
-		strlcpy(history_searchstring, key_line + 1, sizeof(history_searchstring));
+		dp_strlcpy(history_searchstring, key_line + 1, sizeof(history_searchstring));
 		i = 0;
 	}
 	else i = history_line + 1;
@@ -694,7 +696,7 @@ Interactive line editing and console scrollback
 ====================
 */
 
-int chat_mode; // 0 for say, 1 for say_team, -1 for command
+signed char chat_mode; // 0 for say, 1 for say_team, -1 for command
 char chat_buffer[MAX_INPUTLINE];
 int chat_bufferpos = 0;
 
@@ -768,7 +770,7 @@ int Key_Parse_CommonKeys(cmd_state_t *cmd, qbool is_console, int key, int unicod
 	if ((key == 'v' && KM_CTRL) || ((key == K_INS || key == K_KP_INS) && KM_SHIFT))
 	{
 		char *cbd, *p;
-		if ((cbd = Sys_GetClipboardData()) != 0)
+		if ((cbd = Sys_SDL_GetClipboardData()) != 0)
 		{
 			int i;
 #if 1
@@ -949,7 +951,7 @@ int Key_Parse_CommonKeys(cmd_state_t *cmd, qbool is_console, int key, int unicod
 		{
 			// hide ']' from u8_prevbyte otherwise it could go out of bounds
 			int newpos = (int)u8_prevbyte(line + linestart, linepos - linestart) + linestart;
-			strlcpy(line + newpos, line + linepos, linesize + 1 - linepos);
+			dp_strlcpy(line + newpos, line + linepos, linesize + 1 - linepos);
 			linepos = newpos;
 		}
 		return linepos;
@@ -1098,8 +1100,7 @@ static int Key_Convert_NumPadKey(int key)
 	return key;
 }
 
-static void
-Key_Console(cmd_state_t *cmd, int key, int unicode)
+static void Key_Console(cmd_state_t *cmd, int key, int unicode)
 {
 	int linepos;
 
@@ -1121,8 +1122,9 @@ Key_Console(cmd_state_t *cmd, int key, int unicode)
 
 	if ((key == K_ENTER || key == K_KP_ENTER) && KM_NONE)
 	{
-		Cbuf_AddText (cmd, key_line+1);	// skip the ]
-		Cbuf_AddText (cmd, "\n");
+		// bones_was_here: prepending allows a loop such as `alias foo "bar; wait; foo"; foo`
+		// to be broken with an alias or unalias command
+		Cbuf_InsertText(cmd, key_line+1); // skip the ]
 		Key_History_Push();
 		key_linepos = Key_ClearEditLine(true);
 		// force an update, because the command may take some time
@@ -1263,7 +1265,7 @@ Key_Console(cmd_state_t *cmd, int key, int unicode)
 	if (keydown[K_CTRL])
 	{
 		// text zoom in
-		if ((key == '+' || key == K_KP_PLUS) && KM_CTRL)
+		if ((key == '=' || key == '+' || key == K_KP_PLUS) && KM_CTRL)
 		{
 			if (con_textsize.integer < 128)
 				Cvar_SetValueQuick(&con_textsize, con_textsize.integer + 1);
@@ -1306,7 +1308,7 @@ Key_Message (cmd_state_t *cmd, int key, int ascii)
 	if (key == K_ENTER || key == K_KP_ENTER || ascii == 10 || ascii == 13)
 	{
 		if(chat_mode < 0)
-			Cmd_ExecuteString(cmd, chat_buffer, src_local, true); // not Cbuf_AddText to allow semiclons in args; however, this allows no variables then. Use aliases!
+			Cmd_ExecuteString(cmd, chat_buffer, strlen(chat_buffer), src_local, true); // not Cbuf_AddText to allow semiclons in args; however, this allows no variables then. Use aliases!
 		else
 			CL_ForwardToServer(va(vabuf, sizeof(vabuf), "%s %s", chat_mode ? "say_team" : "say ", chat_buffer));
 
@@ -1351,6 +1353,7 @@ the K_* names are matched up.
 int
 Key_StringToKeynum (const char *str)
 {
+	Uchar ch;
 	const keyname_t  *kn;
 
 	if (!str || !str[0])
@@ -1362,7 +1365,11 @@ Key_StringToKeynum (const char *str)
 		if (!strcasecmp (str, kn->name))
 			return kn->keynum;
 	}
-	return -1;
+
+	// non-ascii keys are Unicode codepoints, so give the character if it's valid;
+	// error message have more than one character, don't allow it
+	ch = u8_getnchar(str, &str, 3);
+	return (ch == 0 || *str != 0) ? -1 : (int)ch;
 }
 
 /*
@@ -1387,13 +1394,9 @@ Key_KeynumToString (int keynum, char *tinystr, size_t tinystrlength)
 			return kn->name;
 
 	// if it is printable, output it as a single character
-	if (keynum > 32 && keynum < 256)
+	if (keynum > 32)
 	{
-		if (tinystrlength >= 2)
-		{
-			tinystr[0] = keynum;
-			tinystr[1] = 0;
-		}
+		u8_fromchar(keynum, tinystr, tinystrlength);
 		return tinystr;
 	}
 
@@ -1513,9 +1516,9 @@ Key_In_Bind_f(cmd_state_t *cmd)
 // copy the rest of the command line
 	line[0] = 0;							// start out with a null string
 	for (i = 3; i < c; i++) {
-		strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
+		dp_strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
 		if (i != (c - 1))
-			strlcat (line, " ", sizeof (line));
+			dp_strlcat (line, " ", sizeof (line));
 	}
 
 	if(!Key_SetBinding (b, m, line))
@@ -1586,7 +1589,7 @@ static void
 Key_PrintBindList(int j)
 {
 	char bindbuf[MAX_INPUTLINE];
-	char tinystr[2];
+	char tinystr[TINYSTR_LEN];
 	const char *p;
 	int i;
 
@@ -1597,9 +1600,9 @@ Key_PrintBindList(int j)
 		{
 			Cmd_QuoteString(bindbuf, sizeof(bindbuf), p, "\"\\", false);
 			if (j == 0)
-				Con_Printf("^2%s ^7= \"%s\"\n", Key_KeynumToString (i, tinystr, sizeof(tinystr)), bindbuf);
+				Con_Printf("^2%s ^7= \"%s\"\n", Key_KeynumToString (i, tinystr, TINYSTR_LEN), bindbuf);
 			else
-				Con_Printf("^3bindmap %d: ^2%s ^7= \"%s\"\n", j, Key_KeynumToString (i, tinystr, sizeof(tinystr)), bindbuf);
+				Con_Printf("^3bindmap %d: ^2%s ^7= \"%s\"\n", j, Key_KeynumToString (i, tinystr, TINYSTR_LEN), bindbuf);
 		}
 	}
 }
@@ -1660,9 +1663,9 @@ Key_Bind_f(cmd_state_t *cmd)
 // copy the rest of the command line
 	line[0] = 0;							// start out with a null string
 	for (i = 2; i < c; i++) {
-		strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
+		dp_strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
 		if (i != (c - 1))
-			strlcat (line, " ", sizeof (line));
+			dp_strlcat (line, " ", sizeof (line));
 	}
 
 	if(!Key_SetBinding (b, 0, line))
@@ -1679,7 +1682,7 @@ Key_WriteBindings (qfile_t *f)
 {
 	int         i, j;
 	char bindbuf[MAX_INPUTLINE];
-	char tinystr[2];
+	char tinystr[TINYSTR_LEN];
 	const char *p;
 
 	// Override default binds
@@ -1694,9 +1697,9 @@ Key_WriteBindings (qfile_t *f)
 			{
 				Cmd_QuoteString(bindbuf, sizeof(bindbuf), p, "\"\\", false); // don't need to escape $ because cvars are not expanded inside bind
 				if (j == 0)
-					FS_Printf(f, "bind %s \"%s\"\n", Key_KeynumToString (i, tinystr, sizeof(tinystr)), bindbuf);
+					FS_Printf(f, "bind %s \"%s\"\n", Key_KeynumToString (i, tinystr, TINYSTR_LEN), bindbuf);
 				else
-					FS_Printf(f, "in_bind %d %s \"%s\"\n", j, Key_KeynumToString (i, tinystr, sizeof(tinystr)), bindbuf);
+					FS_Printf(f, "in_bind %d %s \"%s\"\n", j, Key_KeynumToString (i, tinystr, TINYSTR_LEN), bindbuf);
 			}
 		}
 	}
@@ -1970,14 +1973,14 @@ Key_Event (int key, int ascii, qbool down)
 			if(keydown[key] == 1 && down)
 			{
 				// button commands add keynum as a parm
+				// prepend to avoid delays from `wait` commands added by other sources
 				if (bind[0] == '+')
-					Cbuf_AddText (cmd, va(vabuf, sizeof(vabuf), "%s %i\n", bind, key));
+					Cbuf_InsertText(cmd, va(vabuf, sizeof(vabuf), "%s %i\n", bind, key));
 				else
-				{
-					Cbuf_AddText (cmd, bind);
-					Cbuf_AddText (cmd, "\n");
-				}
-			} else if(bind[0] == '+' && !down && keydown[key] == 0)
+					Cbuf_InsertText(cmd, bind);
+			}
+			else if(bind[0] == '+' && !down && keydown[key] == 0)
+				// append -bind to ensure it's after the +bind in case they arrive in the same frame
 				Cbuf_AddText(cmd, va(vabuf, sizeof(vabuf), "-%s %i\n", bind + 1, key));
 		}
 		return;
@@ -2009,7 +2012,7 @@ Key_Event (int key, int ascii, qbool down)
 	{
 		if (down && con_closeontoggleconsole.integer && bind && !strncmp(bind, "toggleconsole", strlen("toggleconsole")) && ascii != STRING_COLOR_TAG)
 		{
-			Cbuf_AddText(cmd, "toggleconsole\n");  // Deferred to next frame so we're not sending the text event to the console.
+			Cbuf_InsertText(cmd, "toggleconsole\n");  // Deferred to next frame so we're not sending the text event to the console.
 			tbl_keydest[key] = key_void; // key release should go nowhere (especially not to key_menu or key_game)
 			return;
 		}
@@ -2051,14 +2054,14 @@ Key_Event (int key, int ascii, qbool down)
 				if(keydown[key] == 1 && down)
 				{
 					// button commands add keynum as a parm
+					// prepend to avoid delays from `wait` commands added by other sources
 					if (bind[0] == '+')
-						Cbuf_AddText (cmd, va(vabuf, sizeof(vabuf), "%s %i\n", bind, key));
+						Cbuf_InsertText(cmd, va(vabuf, sizeof(vabuf), "%s %i\n", bind, key));
 					else
-					{
-						Cbuf_AddText (cmd, bind);
-						Cbuf_AddText (cmd, "\n");
-					}
-				} else if(bind[0] == '+' && !down && keydown[key] == 0)
+						Cbuf_InsertText(cmd, bind);
+				}
+				else if(bind[0] == '+' && !down && keydown[key] == 0)
+					// append -bind to ensure it's after the +bind in case they arrive in the same frame
 					Cbuf_AddText(cmd, va(vabuf, sizeof(vabuf), "-%s %i\n", bind + 1, key));
 			}
 			break;

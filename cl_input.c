@@ -211,7 +211,7 @@ static void IN_BestWeapon_Register(const char *name, int impulse, int weaponbit,
 		Con_Printf("no slot left for weapon definition; increase IN_BESTWEAPON_MAX\n");
 		return; // sorry
 	}
-	strlcpy(in_bestweapon_info[i].name, name, sizeof(in_bestweapon_info[i].name));
+	dp_strlcpy(in_bestweapon_info[i].name, name, sizeof(in_bestweapon_info[i].name));
 	in_bestweapon_info[i].impulse = impulse;
 	if(weaponbit != -1)
 		in_bestweapon_info[i].weaponbit = weaponbit;
@@ -527,7 +527,7 @@ void CL_Input (void)
 	IN_Move ();
 
 	// send mouse move to csqc
-	if (cl.csqc_loaded && cl_csqc_generatemousemoveevents.integer)
+	if (CLVM_prog->loaded && cl_csqc_generatemousemoveevents.integer)
 	{
 		if (cl.csqc_wantsmousemove)
 		{
@@ -535,7 +535,7 @@ void CL_Input (void)
 			static int oldwindowmouse[2];
 			if (oldwindowmouse[0] != in_windowmouse_x || oldwindowmouse[1] != in_windowmouse_y)
 			{
-				CL_VM_InputEvent(3, in_windowmouse_x * vid_conwidth.value / vid.width, in_windowmouse_y * vid_conheight.value / vid.height);
+				CL_VM_InputEvent(3, in_windowmouse_x * vid_conwidth.value / vid.mode.width, in_windowmouse_y * vid_conheight.value / vid.mode.height);
 				oldwindowmouse[0] = in_windowmouse_x;
 				oldwindowmouse[1] = in_windowmouse_y;
 			}
@@ -704,8 +704,8 @@ void CL_Input (void)
 		// mouse interacting with the scene, mostly stationary view
 		V_StopPitchDrift();
 		// update prydon cursor
-		cl.cmd.cursor_screen[0] = in_windowmouse_x * 2.0 / vid.width - 1.0;
-		cl.cmd.cursor_screen[1] = in_windowmouse_y * 2.0 / vid.height - 1.0;
+		cl.cmd.cursor_screen[0] = in_windowmouse_x * 2.0 / vid.mode.width - 1.0;
+		cl.cmd.cursor_screen[1] = in_windowmouse_y * 2.0 / vid.mode.height - 1.0;
 	}
 
 	if(v_flipped.integer)
@@ -1367,7 +1367,7 @@ static void CL_ClientMovement_Physics_Walk(cl_clientmovement_state_t *s)
 			wishspeed *= 0.5;
 
 		// apply edge friction
-		speed = VectorLength2(s->velocity);
+		speed = Vector2Length(s->velocity);
 		if (speed > 0)
 		{
 			friction = cl.movevars_friction;
@@ -1538,8 +1538,8 @@ void CL_UpdateMoveVars(void)
 	else
 	{
 		cl.moveflags = 0;
-		cl.movevars_ticrate = (cls.demoplayback ? 1.0f : host_timescale.value) / bound(10.0f, cl_netfps.value, 1000.0f);
-		cl.movevars_timescale = (cls.demoplayback ? 1.0f : host_timescale.value);
+		cl.movevars_ticrate = 0; // bones_was_here: no guessing, unavailable ticrate triggers better fallbacks
+		cl.movevars_timescale = (cls.demoplayback || host_timescale.value <= 0) ? 1.0f : host_timescale.value;
 		cl.movevars_gravity = sv_gravity.value;
 		cl.movevars_stopspeed = cl_movement_stopspeed.value;
 		cl.movevars_maxspeed = cl_movement_maxspeed.value;
@@ -1777,7 +1777,8 @@ void CL_SendMove(void)
 	usercmd_t *cmd;
 	sizebuf_t buf;
 	unsigned char data[1024];
-	float packettime;
+	float packettime, lag;
+	qbool opportune_moment;
 	qbool quemove;
 	qbool important;
 
@@ -1806,7 +1807,7 @@ void CL_SendMove(void)
 	if (in_button7.state  & 3) bits |=  64;
 	if (in_button8.state  & 3) bits |= 128;
 	if (in_use.state      & 3) bits |= 256;
-	if (key_dest != key_game || key_consoleactive) bits |= 512;
+	if (key_dest != key_game || key_consoleactive || !vid_activewindow) bits |= 512;
 	if (cl_prydoncursor.integer > 0) bits |= 1024;
 	if (in_button9.state  & 3)  bits |=   2048;
 	if (in_button10.state  & 3) bits |=   4096;
@@ -1893,45 +1894,51 @@ void CL_SendMove(void)
 	if (quemove)
 		cl.movecmd[0] = cl.cmd;
 
-	// don't predict more than 200fps
-	if (cl.timesincepacket >= 0.005)
+	/* Accumulating cl.realframetime to prevent low packet rates,
+	 * previously with cl_maxfps == cl_netfps it did not send every frame because
+	 * host.realtime - cl.lastpackettime was often well below (or above) cl_packetinterval.
+	 */
+	cl.timesincepacket += cl.realframetime;
+
+	// don't predict more than 256fps
+	if (cl.timesincepacket >= 1/256)
 		cl.movement_replay = true; // redo the prediction
 
 	// now decide whether to actually send this move
 	// (otherwise it is only for prediction)
 
 	// do not send 0ms packets because they mess up physics
-	if(cl.cmd.msec == 0 && cl.time > cl.oldtime && (cls.protocol == PROTOCOL_QUAKEWORLD || cls.signon == SIGNONS))
+	// DP servers discard (treat like lost) predicted moves shorter than 0.0005s
+	// the time advancing check must be unaffected by time sync as it may have caused the short move
+	if(cl.cmd.msec == 0 && cl.mtime[0] > cl.mtime[1] && (cls.protocol == PROTOCOL_QUAKEWORLD || cls.signon == SIGNONS))
 		return;
 
 	// don't send too often or else network connections can get clogged by a
 	// high renderer framerate
 	packettime = 1.0f / bound(10.0f, cl_netfps.value, 1000.0f);
-	if (cl.movevars_timescale && cl.movevars_ticrate)
-	{
-		// try to ensure at least 1 packet per server frame
-		// and apply soft limit of 2, hard limit < 4 (packettime reduced further below)
-		float maxtic = cl.movevars_ticrate / cl.movevars_timescale;
-		packettime = bound(maxtic * 0.5f, packettime, maxtic);
-	}
-	// bones_was_here: reduce packettime to (largest multiple of realframetime) <= packettime
-	// prevents packet rates lower than cl_netfps or server frame rate
-	// eg: cl_netfps 60 and cl_maxfps 250 would otherwise send only 50 netfps
-	// with this line that config sends 62.5 netfps
-	// (this causes it to emit packets at a steady beat)
-	packettime = floor(packettime / (float)cl.realframetime) * (float)cl.realframetime;
+	if (cl.movevars_ticrate)
+		packettime = bound(cl.movevars_ticrate * 0.5f, packettime, cl.movevars_ticrate);
 
 	// always send if buttons changed or an impulse is pending
 	// even if it violates the rate limit!
 	important = (cl.cmd.impulse || (cl_netimmediatebuttons.integer && cl.cmd.buttons != cl.movecmd[1].buttons));
 
-	// don't send too often (cl_netfps), allowing a small margin for float error
-	// bones_was_here: accumulate realframetime to prevent low packet rates
-	// previously with cl_maxfps == cl_netfps it did not send every frame as
-	// host.realtime - cl.lastpackettime was often well below (or above) packettime
-	if (!important && cl.timesincepacket < packettime * 0.99999f)
+	// improve and stabilise ping by synchronising with the server
+	lag = cl.mtime[0] - cl.cmd.time;
+	//    unknown ticrate    ||     PL or ping spike      || loading
+	if (!cl.movevars_ticrate || lag > cl.movevars_ticrate || lag < 0)
+		opportune_moment = false;
+	else // sync should be possible
 	{
-		cl.timesincepacket += cl.realframetime;
+		float frames_per_tic = cl.movevars_ticrate / cl.realframetime;
+		opportune_moment = lag < 0.999f * (float)cl.realframetime * (frames_per_tic <= 1 ? 1 : sqrtf(frames_per_tic));
+	}
+
+	// don't send too often (cl_netfps)
+	if (!important && cl.timesincepacket < packettime * 0.999f
+	&& (!opportune_moment || cl.opt_inputs_since_update))
+	{
+//		Con_Printf("^1moveft %f realft %f lag %f tic %f inputsince %d opp %d\n", cl.cmd.frametime, cl.realframetime, lag, cl.movevars_ticrate, cl.opt_inputs_since_update, opportune_moment);
 		return;
 	}
 
@@ -1943,8 +1950,11 @@ void CL_SendMove(void)
 	if (!NetConn_CanSend(cls.netcon) && !important)
 		return;
 
-	// reset the packet timing accumulator
-	cl.timesincepacket = cl.realframetime;
+//	Con_Printf("%smoveft %f realft %f lag %f tic %f inputsince %d opp %d import %d\n", (lag < 0.0005 || !opportune_moment) ? "^3" : "^2", cl.cmd.frametime, cl.realframetime, lag, cl.movevars_ticrate, cl.opt_inputs_since_update, opportune_moment, important);
+
+	if (opportune_moment)
+		++cl.opt_inputs_since_update;
+	cl.timesincepacket = 0;
 
 	buf.maxsize = sizeof(data);
 	buf.cursize = 0;

@@ -296,7 +296,7 @@ static void VM_CL_traceline (prvm_prog_t *prog)
 	move = (int)PRVM_G_FLOAT(OFS_PARM2);
 	ent = PRVM_G_EDICT(OFS_PARM3);
 
-	if (VEC_IS_NAN(v1[0]) || VEC_IS_NAN(v1[1]) || VEC_IS_NAN(v1[2]) || VEC_IS_NAN(v2[0]) || VEC_IS_NAN(v2[1]) || VEC_IS_NAN(v2[2]))
+	if (isnan(v1[0]) || isnan(v1[1]) || isnan(v1[2]) || isnan(v2[0]) || isnan(v2[1]) || isnan(v2[2]))
 		prog->error_cmd("%s: NAN errors detected in traceline('%f %f %f', '%f %f %f', %i, entity %i)\n", prog->name, v1[0], v1[1], v1[2], v2[0], v2[1], v2[2], move, PRVM_EDICT_TO_PROG(ent));
 
 	trace = CL_TraceLine(v1, v2, move, ent, CL_GenericHitSuperContentsMask(ent), 0, 0, collision_extendtracelinelength.value, CL_HitNetworkBrushModels(move), CL_HitNetworkPlayers(move), &svent, true, false);
@@ -336,7 +336,7 @@ static void VM_CL_tracebox (prvm_prog_t *prog)
 	move = (int)PRVM_G_FLOAT(OFS_PARM4);
 	ent = PRVM_G_EDICT(OFS_PARM5);
 
-	if (VEC_IS_NAN(v1[0]) || VEC_IS_NAN(v1[1]) || VEC_IS_NAN(v1[2]) || VEC_IS_NAN(v2[0]) || VEC_IS_NAN(v2[1]) || VEC_IS_NAN(v2[2]))
+	if (isnan(v1[0]) || isnan(v1[1]) || isnan(v1[2]) || isnan(v2[0]) || isnan(v2[1]) || isnan(v2[2]))
 		prog->error_cmd("%s: NAN errors detected in tracebox('%f %f %f', '%f %f %f', '%f %f %f', '%f %f %f', %i, entity %i)\n", prog->name, v1[0], v1[1], v1[2], m1[0], m1[1], m1[2], m2[0], m2[1], m2[2], v2[0], v2[1], v2[2], move, PRVM_EDICT_TO_PROG(ent));
 
 	trace = CL_TraceBox(v1, m1, m2, v2, move, ent, CL_GenericHitSuperContentsMask(ent), 0, 0, collision_extendtraceboxlength.value, CL_HitNetworkBrushModels(move), CL_HitNetworkPlayers(move), &svent, true);
@@ -469,7 +469,7 @@ static void VM_CL_findradius (prvm_prog_t *prog)
 	else
 		chainfield = prog->fieldoffsets.chain;
 	if(chainfield < 0)
-		prog->error_cmd("VM_findchain: %s doesnt have the specified chain field !", prog->name);
+		prog->error_cmd("VM_CL_findradius: %s doesnt have the specified chain field !", prog->name);
 
 	chain = (prvm_edict_t *)prog->edicts;
 
@@ -519,6 +519,42 @@ static void VM_CL_findradius (prvm_prog_t *prog)
 	VM_RETURN_EDICT(chain);
 }
 
+// #566 entity(vector mins, vector maxs) findbox
+// #566 entity(vector mins, vector maxs, .entity tofield) findbox_tofield
+static void VM_CL_findbox (prvm_prog_t *prog)
+{
+	prvm_edict_t *chain;
+	int i, numtouchedicts;
+	static prvm_edict_t *touchedicts[MAX_EDICTS];
+	int chainfield;
+
+	VM_SAFEPARMCOUNTRANGE(2, 3, VM_CL_findbox);
+
+	if(prog->argc == 3)
+		chainfield = PRVM_G_INT(OFS_PARM2);
+	else
+		chainfield = prog->fieldoffsets.chain;
+	if(chainfield < 0)
+		prog->error_cmd("VM_CL_findbox: %s doesnt have the specified chain field !", prog->name);
+
+	chain = (prvm_edict_t *)prog->edicts;
+
+	numtouchedicts = World_EntitiesInBox(&cl.world, PRVM_G_VECTOR(OFS_PARM0), PRVM_G_VECTOR(OFS_PARM1), MAX_EDICTS, touchedicts);
+	if (numtouchedicts > MAX_EDICTS)
+	{
+		// this never happens	//[515]: for what then ?
+		Con_Printf("World_EntitiesInBox returned %i edicts, max was %i\n", numtouchedicts, MAX_EDICTS);
+		numtouchedicts = MAX_EDICTS;
+	}
+	for (i = 0; i < numtouchedicts; ++i)
+	{
+		PRVM_EDICTFIELDEDICT(touchedicts[i], chainfield) = PRVM_EDICT_TO_PROG(chain);
+		chain = touchedicts[i];
+	}
+
+	VM_RETURN_EDICT(chain);
+}
+
 // #34 float() droptofloor
 static void VM_CL_droptofloor (prvm_prog_t *prog)
 {
@@ -547,7 +583,12 @@ static void VM_CL_droptofloor (prvm_prog_t *prog)
 	VectorCopy(PRVM_clientedictvector(ent, mins), mins);
 	VectorCopy(PRVM_clientedictvector(ent, maxs), maxs);
 	VectorCopy(PRVM_clientedictvector(ent, origin), end);
-	end[2] -= 256;
+	if (cl.worldmodel->brush.isq3bsp)
+		end[2] -= 4096;
+	else if (cl.worldmodel->brush.isq2bsp)
+		end[2] -= 128;
+	else
+		end[2] -= 256; // Quake, QuakeWorld
 
 	trace = CL_TraceBox(start, mins, maxs, end, MOVE_NORMAL, ent, CL_GenericHitSuperContentsMask(ent), 0, 0, collision_extendmovelength.value, true, true, NULL, true);
 
@@ -577,7 +618,7 @@ static void VM_CL_lightstyle (prvm_prog_t *prog)
 		VM_Warning(prog, "VM_CL_lightstyle >= MAX_LIGHTSTYLES\n");
 		return;
 	}
-	strlcpy (cl.lightstyle[i].map, c, sizeof (cl.lightstyle[i].map));
+	dp_strlcpy (cl.lightstyle[i].map, c, sizeof (cl.lightstyle[i].map));
 	cl.lightstyle[i].map[MAX_STYLESTRING - 1] = 0;
 	cl.lightstyle[i].length = (int)strlen(cl.lightstyle[i].map);
 }
@@ -935,9 +976,27 @@ static void VM_CL_R_SetView (prvm_prog_t *prog)
 			VM_Warning(prog, "VM_CL_R_GetView : unknown parm %i\n", c);
 			return;
 		}
+		if (csqc_lowres.integer)
+		{
+			switch(c)
+			{
+				case VF_MIN: case VF_MIN_X: case VF_MIN_Y: case VF_SIZE: case VF_SIZE_X: case VF_SIZE_Y: case VF_VIEWPORT:
+					VectorScale(PRVM_G_VECTOR(OFS_RETURN), vid_conwidth.value / vid.mode.width, PRVM_G_VECTOR(OFS_RETURN));
+			}
+		}
 		return;
 	}
 
+	if (csqc_lowres.integer)
+	{
+		float scale = vid.mode.width / vid_conwidth.value;
+		switch(c)
+		{
+			case VF_MIN: case VF_MIN_X: case VF_MIN_Y: case VF_SIZE: case VF_SIZE_X: case VF_SIZE_Y: case VF_VIEWPORT:
+				VectorScale(PRVM_G_VECTOR(OFS_PARM1), scale, PRVM_G_VECTOR(OFS_PARM1));
+				VectorScale(PRVM_G_VECTOR(OFS_PARM2), scale, PRVM_G_VECTOR(OFS_PARM2));
+		}
+	}
 	f = PRVM_G_VECTOR(OFS_PARM1);
 	k = PRVM_G_FLOAT(OFS_PARM1);
 	switch(c)
@@ -1331,7 +1390,7 @@ void VM_drawcharacter(prvm_prog_t *prog)
 	if(character == 0)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -1;
-		VM_Warning(prog, "VM_drawcharacter: %s passed null character !\n",prog->name);
+		VM_Warning(prog, "VM_drawcharacter: null character passed!\n");
 		return;
 	}
 
@@ -1343,7 +1402,7 @@ void VM_drawcharacter(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawcharacter: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawcharacter: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1390,7 +1449,7 @@ void VM_drawstring(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawstring: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawstring: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1456,7 +1515,7 @@ void VM_drawcolorcodedstring(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >= DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawcolorcodedstring: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawcolorcodedstring: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1598,7 +1657,7 @@ void VM_loadfont(prvm_prog_t *prog)
 		if (i >= 0 && i < dp_fonts.maxsize)
 		{
 			f = &dp_fonts.f[i];
-			strlcpy(f->title, fontname, sizeof(f->title)); // replace name
+			dp_strlcpy(f->title, fontname, sizeof(f->title)); // replace name
 		}
 	}
 	if (!f)
@@ -1622,8 +1681,8 @@ void VM_loadfont(prvm_prog_t *prog)
 		f->req_face = 0;
 		c = cm;
 	}
-	if(!c || (c - filelist) > MAX_QPATH)
-		strlcpy(mainfont, filelist, sizeof(mainfont));
+	if(!c || (c - filelist) >= MAX_QPATH)
+		dp_strlcpy(mainfont, filelist, sizeof(mainfont));
 	else
 	{
 		memcpy(mainfont, filelist, c - filelist);
@@ -1648,9 +1707,9 @@ void VM_loadfont(prvm_prog_t *prog)
 			f->fallback_faces[i] = 0; // f->req_face; could make it stick to the default-font's face index
 			c = cm;
 		}
-		if(!c || (c-filelist) > MAX_QPATH)
+		if(!c || (c-filelist) >= MAX_QPATH)
 		{
-			strlcpy(f->fallbacks[i], filelist, sizeof(mainfont));
+			dp_strlcpy(f->fallbacks[i], filelist, sizeof(mainfont));
 		}
 		else
 		{
@@ -1727,7 +1786,7 @@ void VM_drawpic(prvm_prog_t *prog)
 	if(!1)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -4;
-		VM_Warning(prog, "VM_drawpic: %s: %s not cached !\n", prog->name, picname);
+		VM_Warning(prog, "VM_drawpic: %s not cached !\n", picname);
 		return;
 	}
 
@@ -1740,7 +1799,7 @@ void VM_drawpic(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawpic: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawpic: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1775,7 +1834,7 @@ void VM_drawrotpic(prvm_prog_t *prog)
 	if(!1)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -4;
-		VM_Warning(prog, "VM_drawrotpic: %s: %s not cached !\n", prog->name, picname);
+		VM_Warning(prog, "VM_drawrotpic: %s not cached !\n", picname);
 		return;
 	}
 
@@ -1788,7 +1847,7 @@ void VM_drawrotpic(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawrotpic: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawrotpic: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1824,7 +1883,7 @@ void VM_drawsubpic(prvm_prog_t *prog)
 	if(!1)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -4;
-		VM_Warning(prog, "VM_drawsubpic: %s: %s not cached !\n", prog->name, picname);
+		VM_Warning(prog, "VM_drawsubpic: %s not cached !\n", picname);
 		return;
 	}
 
@@ -1839,7 +1898,7 @@ void VM_drawsubpic(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawsubpic: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawsubpic: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1881,7 +1940,7 @@ void VM_drawfill(prvm_prog_t *prog)
 	if(flag < DRAWFLAG_NORMAL || flag >=DRAWFLAG_NUMFLAGS)
 	{
 		PRVM_G_FLOAT(OFS_RETURN) = -2;
-		VM_Warning(prog, "VM_drawfill: %s: wrong DRAWFLAG %i !\n",prog->name,flag);
+		VM_Warning(prog, "VM_drawfill: wrong DRAWFLAG %i !\n", flag);
 		return;
 	}
 
@@ -1976,6 +2035,7 @@ static void VM_CL_getstatf (prvm_prog_t *prog)
 	i = (int)PRVM_G_FLOAT(OFS_PARM0);
 	if(i < 0 || i >= MAX_CL_STATS)
 	{
+		PRVM_G_FLOAT(OFS_RETURN) = 0;
 		VM_Warning(prog, "VM_CL_getstatf: index>=MAX_CL_STATS or index<0\n");
 		return;
 	}
@@ -1986,12 +2046,18 @@ static void VM_CL_getstatf (prvm_prog_t *prog)
 //#331 float(float stnum) getstati (EXT_CSQC)
 static void VM_CL_getstati (prvm_prog_t *prog)
 {
-	int i, index;
-	int firstbit, bitcount;
+	int index, firstbit, bitcount;
 
 	VM_SAFEPARMCOUNTRANGE(1, 3, VM_CL_getstati);
 
 	index = (int)PRVM_G_FLOAT(OFS_PARM0);
+	if(index < 0 || index >= MAX_CL_STATS)
+	{
+		PRVM_G_FLOAT(OFS_RETURN) = 0;
+		VM_Warning(prog, "VM_CL_getstati: index(%i) is >=MAX_CL_STATS(%i) or <0\n", index, MAX_CL_STATS);
+		return;
+	}
+
 	if (prog->argc > 1)
 	{
 		firstbit = (int)PRVM_G_FLOAT(OFS_PARM1);
@@ -2006,15 +2072,10 @@ static void VM_CL_getstati (prvm_prog_t *prog)
 		bitcount = 32;
 	}
 
-	if(index < 0 || index >= MAX_CL_STATS)
-	{
-		VM_Warning(prog, "VM_CL_getstati: index>=MAX_CL_STATS or index<0\n");
-		return;
-	}
-	i = cl.stats[index];
-	if (bitcount != 32)	//32 causes the mask to overflow, so there's nothing to subtract from.
-		i = (((unsigned int)i)&(((1<<bitcount)-1)<<firstbit))>>firstbit;
-	PRVM_G_FLOAT(OFS_RETURN) = i;
+	if (bitcount < 32)	//32 causes the mask to overflow, so there's nothing to subtract from.
+		PRVM_G_FLOAT(OFS_RETURN) = cl.stats[index]>>firstbit & ((1<<bitcount)-1);
+	else
+		PRVM_G_FLOAT(OFS_RETURN) = cl.stats[index];
 }
 
 //#332 string(float firststnum) getstats (EXT_CSQC)
@@ -2022,6 +2083,7 @@ static void VM_CL_getstats (prvm_prog_t *prog)
 {
 	int i;
 	char t[17];
+	size_t t_len;
 	VM_SAFEPARMCOUNT(1, VM_CL_getstats);
 	i = (int)PRVM_G_FLOAT(OFS_PARM0);
 	if(i < 0 || i > MAX_CL_STATS-4)
@@ -2030,8 +2092,8 @@ static void VM_CL_getstats (prvm_prog_t *prog)
 		VM_Warning(prog, "VM_CL_getstats: index>MAX_CL_STATS-4 or index<0\n");
 		return;
 	}
-	strlcpy(t, (char*)&cl.stats[i], sizeof(t));
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, t);
+	t_len = dp_strlcpy(t, (char*)&cl.stats[i], sizeof(t));
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, t, t_len);
 }
 
 //#333 void(entity e, float mdlindex) setmodelindex (EXT_CSQC)
@@ -2214,9 +2276,9 @@ static void VM_CL_getmousepos(prvm_prog_t *prog)
 	if (key_consoleactive || key_dest != key_game)
 		VectorSet(PRVM_G_VECTOR(OFS_RETURN), 0, 0, 0);
 	else if (cl.csqc_wantsmousemove)
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.width, in_windowmouse_y * vid_conheight.integer / vid.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.mode.width, in_windowmouse_y * vid_conheight.integer / vid.mode.height, 0);
 	else
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.width, in_mouse_y * vid_conheight.integer / vid.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.mode.width, in_mouse_y * vid_conheight.integer / vid.mode.height, 0);
 }
 
 //#345 float(float framenum) getinputstate (EXT_CSQC)
@@ -2333,9 +2395,10 @@ static void VM_CL_runplayerphysics (prvm_prog_t *prog)
 //#348 string(float playernum, string keyname) getplayerkeyvalue (EXT_CSQC)
 static void VM_CL_getplayerkey (prvm_prog_t *prog)
 {
-	int			i;
-	char		t[128];
-	const char	*c;
+	int i;
+	char t[128];
+	size_t t_len;
+	const char *c;
 
 	VM_SAFEPARMCOUNT(2, VM_CL_getplayerkey);
 
@@ -2350,39 +2413,40 @@ static void VM_CL_getplayerkey (prvm_prog_t *prog)
 		return;
 
 	t[0] = 0;
+	t_len = 0;
 
 	if(!strcasecmp(c, "name"))
-		strlcpy(t, cl.scores[i].name, sizeof(t));
+		t_len = dp_strlcpy(t, cl.scores[i].name, sizeof(t));
 	else
 		if(!strcasecmp(c, "frags"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].frags);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].frags);
 	else
 		if(!strcasecmp(c, "ping"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_ping);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_ping);
 	else
 		if(!strcasecmp(c, "pl"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_packetloss);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_packetloss);
 	else
 		if(!strcasecmp(c, "movementloss"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_movementloss);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].qw_movementloss);
 	else
 		if(!strcasecmp(c, "entertime"))
-			dpsnprintf(t, sizeof(t), "%f", cl.scores[i].qw_entertime);
+			t_len = dpsnprintf(t, sizeof(t), "%f", cl.scores[i].qw_entertime);
 	else
 		if(!strcasecmp(c, "colors"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].colors);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].colors);
 	else
 		if(!strcasecmp(c, "topcolor"))
-			dpsnprintf(t, sizeof(t), "%i", cl.scores[i].colors & 0xf0);
+			t_len = dpsnprintf(t, sizeof(t), "%i", cl.scores[i].colors & 0xf0);
 	else
 		if(!strcasecmp(c, "bottomcolor"))
-			dpsnprintf(t, sizeof(t), "%i", (cl.scores[i].colors &15)<<4);
+			t_len = dpsnprintf(t, sizeof(t), "%i", (cl.scores[i].colors &15)<<4);
 	else
 		if(!strcasecmp(c, "viewentity"))
-			dpsnprintf(t, sizeof(t), "%i", i+1);
+			t_len = dpsnprintf(t, sizeof(t), "%i", i+1);
 	if(!t[0])
 		return;
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, t);
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, t, t_len);
 }
 
 //#351 void(vector origin, vector forward, vector right, vector up) SetListener (EXT_CSQC)
@@ -2402,71 +2466,74 @@ static void VM_CL_setlistener (prvm_prog_t *prog)
 static void VM_CL_registercmd (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(1, VM_CL_registercmd);
-	if(!Cmd_Exists(cmd_local, PRVM_G_STRING(OFS_PARM0)))
-		Cmd_AddCommand(CF_CLIENT, PRVM_G_STRING(OFS_PARM0), NULL, "console command created by QuakeC");
+	Cmd_AddCommand(CF_CLIENT, PRVM_G_STRING(OFS_PARM0), NULL, "console command created by QuakeC");
 }
 
-//#360 float() readbyte (EXT_CSQC)
+//#360 float() ReadByte (EXT_CSQC)
 static void VM_CL_ReadByte (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadByte);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadByte(&cl_message);
 }
 
-//#361 float() readchar (EXT_CSQC)
+//#361 float() ReadChar (EXT_CSQC)
 static void VM_CL_ReadChar (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadChar);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadChar(&cl_message);
 }
 
-//#362 float() readshort (EXT_CSQC)
+//#362 float() ReadShort (EXT_CSQC)
 static void VM_CL_ReadShort (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadShort);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadShort(&cl_message);
 }
 
-//#363 float() readlong (EXT_CSQC)
+//#363 float() ReadLong (EXT_CSQC)
 static void VM_CL_ReadLong (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadLong);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadLong(&cl_message);
 }
 
-//#364 float() readcoord (EXT_CSQC)
+//#364 float() ReadCoord (EXT_CSQC)
 static void VM_CL_ReadCoord (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadCoord);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadCoord(&cl_message, cls.protocol);
 }
 
-//#365 float() readangle (EXT_CSQC)
+//#365 float() ReadAngle (EXT_CSQC)
 static void VM_CL_ReadAngle (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadAngle);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadAngle(&cl_message, cls.protocol);
 }
 
-//#366 string() readstring (EXT_CSQC)
+//#366 string() ReadString (EXT_CSQC)
 static void VM_CL_ReadString (prvm_prog_t *prog)
 {
+	size_t cl_readstring_len;
+
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadString);
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));
+	cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cl_readstring, cl_readstring_len);
 }
 
-//#367 float() readfloat (EXT_CSQC)
+//#367 float() ReadFloat (EXT_CSQC)
 static void VM_CL_ReadFloat (prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadFloat);
 	PRVM_G_FLOAT(OFS_RETURN) = MSG_ReadFloat(&cl_message);
 }
 
-//#501 string() readpicture (DP_CSQC_READWRITEPICTURE)
+//#501 string() ReadPicture (DP_CSQC_READWRITEPICTURE)
 extern cvar_t cl_readpicture_force;
 static void VM_CL_ReadPicture (prvm_prog_t *prog)
 {
 	const char *name;
+	size_t name_len;
 	unsigned char *data;
 	unsigned char *buf;
 	unsigned short size;
@@ -2475,7 +2542,8 @@ static void VM_CL_ReadPicture (prvm_prog_t *prog)
 
 	VM_SAFEPARMCOUNT(0, VM_CL_ReadPicture);
 
-	name = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+	name_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+	name = cl_readstring;
 	size = (unsigned short) MSG_ReadShort(&cl_message);
 
 	// check if a texture of that name exists
@@ -2506,7 +2574,7 @@ static void VM_CL_ReadPicture (prvm_prog_t *prog)
 		}
 	}
 
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, name);
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, name, name_len);
 }
 
 //////////////////////////////////////////////////////////
@@ -2637,8 +2705,6 @@ static void VM_CL_copyentity (prvm_prog_t *prog)
 	}
 	memcpy(out->fields.fp, in->fields.fp, prog->entityfields * sizeof(prvm_vec_t));
 
-	if (VectorCompare(PRVM_clientedictvector(out, absmin), PRVM_clientedictvector(out, absmax)))
-		return;
 	CL_LinkEdict(out);
 }
 
@@ -3371,7 +3437,7 @@ static void VM_CL_gettaginfo (prvm_prog_t *prog)
 	Matrix4x4_ToVectors(&tag_localmatrix, forward, left, up, origin);
 
 	PRVM_clientglobalfloat(gettaginfo_parent) = parentindex;
-	PRVM_clientglobalstring(gettaginfo_name) = tagname ? PRVM_SetTempString(prog, tagname) : 0;
+	PRVM_clientglobalstring(gettaginfo_name) = tagname ? PRVM_SetTempString(prog, tagname, strlen(tagname)) : 0;
 	VectorCopy(forward, PRVM_clientglobalvector(gettaginfo_forward));
 	VectorScale(left, -1, PRVM_clientglobalvector(gettaginfo_right));
 	VectorCopy(up, PRVM_clientglobalvector(gettaginfo_up));
@@ -4090,7 +4156,7 @@ static void VM_CL_R_PolygonBegin (prvm_prog_t *prog)
 	prog->polygonbegin_model = mod;
 	if (texname == NULL || texname[0] == 0)
 		texname = "$whiteimage";
-	strlcpy(prog->polygonbegin_texname, texname, sizeof(prog->polygonbegin_texname));
+	dp_strlcpy(prog->polygonbegin_texname, texname, sizeof(prog->polygonbegin_texname));
 	prog->polygonbegin_drawflags = drawflags;
 	prog->polygonbegin_numvertices = 0;
 }
@@ -4165,7 +4231,7 @@ static void VM_CL_R_PolygonEnd (prvm_prog_t *prog)
 	}
 
 	// create the surface, looking up the best matching texture/shader
-	materialflags = MATERIALFLAG_WALL;
+	materialflags = MATERIALFLAG_WALL | MATERIALFLAG_FULLBRIGHT;
 	if (csqc_polygons_defaultmaterial_nocullface.integer)
 		materialflags |= MATERIALFLAG_NOCULLFACE;
 	if (hascolor)
@@ -4455,10 +4521,10 @@ string(string key) serverkey
 */
 static void VM_CL_serverkey(prvm_prog_t *prog)
 {
-	char string[VM_STRINGTEMP_LENGTH];
+	char string[VM_TEMPSTRING_MAXSIZE];
 	VM_SAFEPARMCOUNT(1, VM_CL_serverkey);
 	InfoString_GetValue(cl.qw_serverinfo, PRVM_G_STRING(OFS_PARM0), string, sizeof(string));
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, string);
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, string, strlen(string));
 }
 
 /*
@@ -4479,8 +4545,7 @@ static void VM_CL_checkpvs (prvm_prog_t *prog)
 #if 1
 	unsigned char *pvs;
 #else
-	int fatpvsbytes;
-	unsigned char fatpvs[MAX_MAP_LEAFS/8];
+	unsigned char *fatpvs = NULL;
 #endif
 
 	VM_SAFEPARMCOUNT(2, VM_CL_checkpvs);
@@ -4520,8 +4585,8 @@ static void VM_CL_checkpvs (prvm_prog_t *prog)
 		PRVM_G_FLOAT(OFS_RETURN) = 3;
 		return;
 	}
-	fatpvsbytes = cl.worldmodel->brush.FatPVS(cl.worldmodel, viewpos, 8, fatpvs, sizeof(fatpvs), false);
-	if(!fatpvsbytes)
+	cl.worldmodel->brush.FatPVS(cl.worldmodel, viewpos, 8, &fatpvs, cls.levelmempool, false);
+	if(!fatpvs)
 	{
 		// viewpos isn't in any PVS... darn
 		PRVM_G_FLOAT(OFS_RETURN) = 2;
@@ -4619,7 +4684,7 @@ static void VM_CL_skel_get_bonename(prvm_prog_t *prog)
 		return;
 	if (bonenum < 0 || bonenum >= skeleton->model->num_bones)
 		return;
-	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, skeleton->model->data_bones[bonenum].name);
+	PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, skeleton->model->data_bones[bonenum].name, strlen(skeleton->model->data_bones[bonenum].name));
 }
 
 // #267 float(float skel, float bonenum) skel_get_boneparent = #267; // (FTE_CSQC_SKELETONOBJECTS) returns parent num for supplied bonenum, 0 if bonenum has no parent or bone does not exist (returned value is always less than bonenum, you can loop on this)
@@ -4982,7 +5047,7 @@ NULL,							// #42 (QUAKE)
 VM_fabs,						// #43 float(float f) fabs (QUAKE)
 NULL,							// #44 vector(entity e, float speed) aim (QUAKE)
 VM_cvar,						// #45 float(string s) cvar (QUAKE)
-VM_localcmd_local,				// #46 void(string s) localcmd (QUAKE)
+VM_localcmd,					// #46 void(string s) localcmd (QUAKE)
 VM_nextent,						// #47 entity(entity e) nextent (QUAKE)
 VM_CL_particle,					// #48 void(vector o, vector d, float color, float count) particle (QUAKE)
 VM_changeyaw,					// #49 void() ChangeYaw (QUAKE)
@@ -5052,7 +5117,7 @@ VM_fclose,						// #111 void(float fhandle) fclose (FRIK_FILE)
 VM_fgets,						// #112 string(float fhandle) fgets (FRIK_FILE)
 VM_fputs,						// #113 void(float fhandle, string s) fputs (FRIK_FILE)
 VM_strlen,						// #114 float(string s) strlen (FRIK_FILE)
-VM_strcat,						// #115 string(string s1, string s2, ...) strcat (FRIK_FILE)
+VM_strcat,						// #115 string(string s, string...) strcat (FRIK_FILE)
 VM_substring,					// #116 string(string s, float start, float length) substring (FRIK_FILE)
 VM_stov,						// #117 vector(string) stov (FRIK_FILE)
 VM_strzone,						// #118 string(string s) strzone (FRIK_FILE)
@@ -5299,14 +5364,14 @@ VM_findfont,					// #356 float(string fontname) loadfont (DP_GFX_FONTS)
 VM_loadfont,					// #357 float(string fontname, string fontmaps, string sizes, float slot) loadfont (DP_GFX_FONTS)
 VM_CL_loadcubemap,				// #358 void(string cubemapname) loadcubemap (DP_GFX_)
 NULL,							// #359
-VM_CL_ReadByte,					// #360 float() readbyte (EXT_CSQC)
-VM_CL_ReadChar,					// #361 float() readchar (EXT_CSQC)
-VM_CL_ReadShort,				// #362 float() readshort (EXT_CSQC)
-VM_CL_ReadLong,					// #363 float() readlong (EXT_CSQC)
-VM_CL_ReadCoord,				// #364 float() readcoord (EXT_CSQC)
-VM_CL_ReadAngle,				// #365 float() readangle (EXT_CSQC)
-VM_CL_ReadString,				// #366 string() readstring (EXT_CSQC)
-VM_CL_ReadFloat,				// #367 float() readfloat (EXT_CSQC)
+VM_CL_ReadByte,					// #360 float() ReadByte (EXT_CSQC)
+VM_CL_ReadChar,					// #361 float() ReadChar (EXT_CSQC)
+VM_CL_ReadShort,				// #362 float() ReadShort (EXT_CSQC)
+VM_CL_ReadLong,					// #363 float() ReadLong (EXT_CSQC)
+VM_CL_ReadCoord,				// #364 float() ReadCoord (EXT_CSQC)
+VM_CL_ReadAngle,				// #365 float() ReadAngle (EXT_CSQC)
+VM_CL_ReadString,				// #366 string() ReadString (EXT_CSQC)
+VM_CL_ReadFloat,				// #367 float() ReadFloat (EXT_CSQC)
 NULL,						// #368
 NULL,							// #369
 NULL,							// #370
@@ -5506,8 +5571,8 @@ NULL,							// #562
 NULL,							// #563
 NULL,							// #564
 NULL,							// #565
-NULL,							// #566
-NULL,							// #567
+VM_CL_findbox,					// #566 entity(vector mins, vector maxs) findbox = #566; (DP_QC_FINDBOX)
+VM_nudgeoutofsolid,				// #567 float(entity ent) nudgeoutofsolid = #567; (DP_QC_NUDGEOUTOFSOLID)
 NULL,							// #568
 NULL,							// #569
 NULL,							// #570

@@ -116,7 +116,6 @@ cvar_t crosshair_color_alpha = {CF_CLIENT | CF_ARCHIVE, "crosshair_color_alpha",
 cvar_t crosshair_size = {CF_CLIENT | CF_ARCHIVE, "crosshair_size", "1", "adjusts size of the crosshair on the screen"};
 
 static void Sbar_MiniDeathmatchOverlay (int x, int y);
-static void Sbar_DeathmatchOverlay (void);
 static void Sbar_IntermissionOverlay (void);
 static void Sbar_FinaleOverlay (void);
 
@@ -359,11 +358,8 @@ static void sbar_newmap(void)
 
 void Sbar_Init (void)
 {
-	if(gamemode == GAME_NORMAL) // Workaround so Quake doesn't trample on Xonotic.
-	{
-		Cmd_AddCommand(CF_CLIENT, "+showscores", Sbar_ShowScores_f, "show scoreboard");
-		Cmd_AddCommand(CF_CLIENT, "-showscores", Sbar_DontShowScores_f, "hide scoreboard");
-	}
+	Cmd_AddCommand(CF_CLIENT, "+showscores", Sbar_ShowScores_f, "show scoreboard");
+	Cmd_AddCommand(CF_CLIENT, "-showscores", Sbar_DontShowScores_f, "hide scoreboard");
 	Cvar_RegisterVariable(&cl_showfps);
 	Cvar_RegisterVariable(&cl_showsound);
 	Cvar_RegisterVariable(&cl_showblur);
@@ -395,6 +391,8 @@ void Sbar_Init (void)
 	Cvar_RegisterVariable(&sbar_miniscoreboard_size);
 	Cvar_RegisterVariable(&sbar_info_pos);
 	Cvar_RegisterVariable(&cl_deathscoreboard);
+	// This cvar is found in Fitzquake-derived engines and FTEQW and is read by the Alkaline 1.2 and Arcane Dimensions 1.80 CSQC
+	Cvar_RegisterVirtual(&sbar_alpha_bg, "scr_sbaralpha");
 
 	Cvar_RegisterVariable(&crosshair_color_red);
 	Cvar_RegisterVariable(&crosshair_color_green);
@@ -623,7 +621,7 @@ void Sbar_SortFrags (void)
 						teamname = "Total Team Score";
 						break;
 				}
-				strlcpy(teams[teamlines-1].name, teamname, sizeof(teams[teamlines-1].name));
+				dp_strlcpy(teams[teamlines-1].name, teamname, sizeof(teams[teamlines-1].name));
 
 				teams[teamlines-1].frags = 0;
 				teams[teamlines-1].colors = color + 16 * color;
@@ -685,7 +683,7 @@ static void Sbar_SoloScoreboard (void)
 		Sbar_DrawString(8+22*8, 4, va(vabuf, sizeof(vabuf), "Secrets:%3i", cl.stats[STAT_SECRETS]));
 
 	// format is like this: e1m1:The Sligpate Complex
-	dpsnprintf(str, sizeof(str), "%s:%s", cl.worldbasename, cl.worldmessage);
+	dpsnprintf(str, sizeof(str), "%s:%.39s", cl.worldbasename, cl.worldmessage);
 
 	// if there's a newline character, terminate the string there
 	if (strchr(str, '\n'))
@@ -894,7 +892,7 @@ static void Sbar_DrawInventory (void)
 
 	// items
 	for (i=0 ; i<6 ; i++)
-		if (cl.stats[STAT_ITEMS] & (1<<(17+i)))
+		if (cl.stats[STAT_ITEMS] & (1u<<(17+i)))
 		{
 			//MED 01/04/97 changed keys
 			if (!(gamemode == GAME_HIPNOTIC || gamemode == GAME_QUOTH) || (i>1))
@@ -906,7 +904,7 @@ static void Sbar_DrawInventory (void)
 	if (gamemode == GAME_HIPNOTIC || gamemode == GAME_QUOTH)
 	{
 		for (i=0 ; i<2 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1<<(24+i)))
+			if (cl.stats[STAT_ITEMS] & (1u<<(24+i)))
 				Sbar_DrawPic (288 + i*16, -16, hsb_items[i]);
 	}
 
@@ -914,14 +912,14 @@ static void Sbar_DrawInventory (void)
 	{
 		// new rogue items
 		for (i=0 ; i<2 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1<<(29+i)))
+			if (cl.stats[STAT_ITEMS] & (1u<<(29+i)))
 				Sbar_DrawPic (288 + i*16, -16, rsb_items[i]);
 	}
 	else
 	{
 		// sigils
 		for (i=0 ; i<4 ; i++)
-			if (cl.stats[STAT_ITEMS] & (1<<(28+i)))
+			if (cl.stats[STAT_ITEMS] & (1u<<(28+i)))
 				Sbar_DrawPic (320-32 + i*8, -16, sb_sigil[i]);
 	}
 }
@@ -1144,12 +1142,12 @@ void Sbar_ShowFPS(void)
 	}
 	if (cl_showtime.integer)
 	{
-		strlcpy(timestring, Sys_TimeString(cl_showtime_format.string), sizeof(timestring));
+		Sys_TimeString(timestring, sizeof(timestring), cl_showtime_format.string);
 		fps_strings++;
 	}
 	if (cl_showdate.integer)
 	{
-		strlcpy(datestring, Sys_TimeString(cl_showdate_format.string), sizeof(datestring));
+		Sys_TimeString(datestring, sizeof(datestring), cl_showdate_format.string);
 		fps_strings++;
 	}
 	if (cl_showblur.integer)
@@ -1217,13 +1215,13 @@ void Sbar_ShowFPS(void)
 		svtrace.fraction = 2.0;
 		cltrace.fraction = 2.0;
 		// ray hits models (even animated ones) and ignores translucent materials
-		if (SVVM_prog != NULL)
+		if (sv.active)
 			svtrace = SV_TraceLine(org, dest, MOVE_HITMODEL, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, collision_extendmovelength.value);
 		cltrace = CL_TraceLine(org, dest, MOVE_HITMODEL, NULL, SUPERCONTENTS_SOLID, 0, MATERIALFLAGMASK_TRANSLUCENT, collision_extendmovelength.value, true, false, &hitnetentity, true, true);
 		if (cltrace.hittexture)
-			strlcpy(texstring, cltrace.hittexture->name, sizeof(texstring));
+			dp_strlcpy(texstring, cltrace.hittexture->name, sizeof(texstring));
 		else
-			strlcpy(texstring, "(no texture hit)", sizeof(texstring));
+			dp_strlcpy(texstring, "(no texture hit)", sizeof(texstring));
 		fps_strings++;
 		if (svtrace.fraction < cltrace.fraction)
 		{
@@ -1233,11 +1231,11 @@ void Sbar_ShowFPS(void)
 				dpsnprintf(entstring, sizeof(entstring), "server entity %i", (int)PRVM_EDICT_TO_PROG(svtrace.ent));
 			}
 			else
-				strlcpy(entstring, "(no entity hit)", sizeof(entstring));
+				dp_strlcpy(entstring, "(no entity hit)", sizeof(entstring));
 		}
 		else
 		{
-			if (CLVM_prog != NULL && cltrace.ent != NULL)
+			if (cltrace.ent != NULL)
 			{
 				prvm_prog_t *prog = CLVM_prog;
 				dpsnprintf(entstring, sizeof(entstring), "client entity %i", (int)PRVM_EDICT_TO_PROG(cltrace.ent));
@@ -1245,9 +1243,9 @@ void Sbar_ShowFPS(void)
 			else if (hitnetentity > 0)
 				dpsnprintf(entstring, sizeof(entstring), "network entity %i", hitnetentity);
 			else if (hitnetentity == 0)
-				strlcpy(entstring, "world entity", sizeof(entstring));
+				dp_strlcpy(entstring, "world entity", sizeof(entstring));
 			else
-				strlcpy(entstring, "(no entity hit)", sizeof(entstring));
+				dp_strlcpy(entstring, "(no entity hit)", sizeof(entstring));
 		}
 		fps_strings++;
 	}

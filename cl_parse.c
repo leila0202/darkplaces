@@ -199,6 +199,13 @@ static void QW_CL_NextUpload_f(cmd_state_t *cmd);
 //static qbool QW_CL_IsUploading(void);
 static void QW_CL_StopUpload_f(cmd_state_t *cmd);
 
+static inline void CL_SetSignonStage_WithMsg(int signon_stage)
+{
+	cls.signon = signon_stage;
+	dpsnprintf(cl_connect_status, sizeof(cl_connect_status), "Connect: signon stage %i of %i", cls.signon, SIGNONS);
+	Con_DPrint(cl_connect_status);
+}
+
 /*
 ==================
 CL_ParseStartSoundPacket
@@ -333,10 +340,7 @@ void CL_KeepaliveMessage (qbool readmessages)
 		if(cls.state != ca_dedicated)
 		{
 			if(countdownupdate <= 0) // check if time stepped backwards
-			{
-				SCR_UpdateLoadingScreenIfShown();
 				countdownupdate = 2;
-			}
 		}
 	}
 
@@ -399,14 +403,14 @@ void CL_ParseEntityLump(char *entdata)
 		if (com_token[0] == '}')
 			break; // end of worldspawn
 		if (com_token[0] == '_')
-			strlcpy (key, com_token + 1, sizeof (key));
+			dp_strlcpy (key, com_token + 1, sizeof (key));
 		else
-			strlcpy (key, com_token, sizeof (key));
+			dp_strlcpy (key, com_token, sizeof (key));
 		while (key[strlen(key)-1] == ' ') // remove trailing spaces
 			key[strlen(key)-1] = 0;
 		if (!COM_ParseToken_Simple(&data, false, false, true))
 			return; // error
-		strlcpy (value, com_token, sizeof (value));
+		dp_strlcpy (value, com_token, sizeof (value));
 		if (!strcmp("sky", key))
 		{
 			loadedsky = true;
@@ -483,9 +487,9 @@ static void CL_SetupWorldModel(void)
 	// set up csqc world for collision culling
 	if (cl.worldmodel)
 	{
-		strlcpy(cl.worldname, cl.worldmodel->name, sizeof(cl.worldname));
+		dp_strlcpy(cl.worldname, cl.worldmodel->name, sizeof(cl.worldname));
 		FS_StripExtension(cl.worldname, cl.worldnamenoextension, sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldmessage, cl.worldmessage);
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
@@ -557,7 +561,7 @@ static qbool QW_CL_CheckOrDownloadFile(const char *filename)
 	if (!cls.netcon)
 		return true;
 
-	strlcpy(cls.qw_downloadname, filename, sizeof(cls.qw_downloadname));
+	dp_strlcpy(cls.qw_downloadname, filename, sizeof(cls.qw_downloadname));
 	Con_Printf("Downloading %s\n", filename);
 
 	if (!cls.qw_downloadmemory)
@@ -617,7 +621,7 @@ static void QW_CL_RequestNextDownload(void)
 		// if we're still in signon stages, request the next one
 		if (cls.signon != SIGNONS)
 		{
-			cls.signon = SIGNONS-1;
+			CL_SetSignonStage_WithMsg(SIGNONS - 1);
 			// we'll go to SIGNONS when the first entity update is received
 			MSG_WriteByte(&cls.netcon->message, qw_clc_stringcmd);
 			MSG_WriteString(&cls.netcon->message, va(vabuf, sizeof(vabuf), "begin %i", cl.qw_servercount));
@@ -834,7 +838,7 @@ static void QW_CL_ParseModelList(void)
 			Host_Error("Server sent too many model precaches");
 		if (strlen(str) >= MAX_QPATH)
 			Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-		strlcpy(cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
+		dp_strlcpy(cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
 	}
 
 	n = MSG_ReadByte(&cl_message);
@@ -845,7 +849,7 @@ static void QW_CL_ParseModelList(void)
 		return;
 	}
 
-	cls.signon = 2;
+	CL_SetSignonStage_WithMsg(2);
 	cls.qw_downloadnumber = 0;
 	cls.qw_downloadtype = dl_model;
 	QW_CL_RequestNextDownload();
@@ -869,7 +873,7 @@ static void QW_CL_ParseSoundList(void)
 			Host_Error("Server sent too many sound precaches");
 		if (strlen(str) >= MAX_QPATH)
 			Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-		strlcpy(cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
+		dp_strlcpy(cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
 	}
 
 	n = MSG_ReadByte(&cl_message);
@@ -881,7 +885,7 @@ static void QW_CL_ParseSoundList(void)
 		return;
 	}
 
-	cls.signon = 2;
+	CL_SetSignonStage_WithMsg(2);
 	cls.qw_downloadnumber = 0;
 	cls.qw_downloadtype = dl_sound;
 	QW_CL_RequestNextDownload();
@@ -901,7 +905,7 @@ static void QW_CL_Changing_f(cmd_state_t *cmd)
 
 	S_StopAllSounds();
 	cl.intermission = 0;
-	cls.signon = 1;	// not active anymore, but not disconnected
+	CL_SetSignonStage_WithMsg(1); // not active anymore, but not disconnected
 	Con_Printf("\nChanging map...\n");
 }
 
@@ -983,7 +987,7 @@ static void QW_CL_ProcessUserInfo(int slot)
 	InfoString_GetValue(cl.scores[slot].qw_userinfo, "team", cl.scores[slot].qw_team, sizeof(cl.scores[slot].qw_team));
 	InfoString_GetValue(cl.scores[slot].qw_userinfo, "skin", cl.scores[slot].qw_skin, sizeof(cl.scores[slot].qw_skin));
 	if (!cl.scores[slot].qw_skin[0])
-		strlcpy(cl.scores[slot].qw_skin, "base", sizeof(cl.scores[slot].qw_skin));
+		dp_strlcpy(cl.scores[slot].qw_skin, "base", sizeof(cl.scores[slot].qw_skin));
 	// TODO: skin cache
 }
 
@@ -999,7 +1003,7 @@ static void QW_CL_UpdateUserInfo(void)
 		return;
 	}
 	cl.scores[slot].qw_userid = MSG_ReadLong(&cl_message);
-	strlcpy(cl.scores[slot].qw_userinfo, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(cl.scores[slot].qw_userinfo));
+	dp_strlcpy(cl.scores[slot].qw_userinfo, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(cl.scores[slot].qw_userinfo));
 
 	QW_CL_ProcessUserInfo(slot);
 }
@@ -1010,8 +1014,8 @@ static void QW_CL_SetInfo(void)
 	char key[2048];
 	char value[2048];
 	slot = MSG_ReadByte(&cl_message);
-	strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
-	strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
+	dp_strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
+	dp_strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
 	if (slot >= cl.maxclients)
 	{
 		Con_Printf("svc_setinfo >= cl.maxclients\n");
@@ -1027,8 +1031,8 @@ static void QW_CL_ServerInfo(void)
 	char key[2048];
 	char value[2048];
 	char temp[32];
-	strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
-	strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
+	dp_strlcpy(key, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(key));
+	dp_strlcpy(value, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof(value));
 	Con_DPrintf("SERVERINFO: %s=%s\n", key, value);
 	InfoString_SetValue(cl.qw_serverinfo, sizeof(cl.qw_serverinfo), key, value);
 	InfoString_GetValue(cl.qw_serverinfo, "teamplay", temp, sizeof(temp));
@@ -1063,9 +1067,10 @@ static void CL_UpdateItemsAndWeapon(void)
 	// check for important changes
 
 	// set flash times
+	// UBSan: unsigned literals because left shifting by 31 causes signed overflow, although it works as expected on x86.
 	if (cl.olditems != cl.stats[STAT_ITEMS])
 		for (j = 0;j < 32;j++)
-			if ((cl.stats[STAT_ITEMS] & (1<<j)) && !(cl.olditems & (1<<j)))
+			if ((cl.stats[STAT_ITEMS] & (1u<<j)) && !(cl.olditems & (1u<<j)))
 				cl.item_gettime[j] = cl.time;
 	cl.olditems = cl.stats[STAT_ITEMS];
 
@@ -1526,7 +1531,7 @@ static void CL_DownloadBegin_f(cmd_state_t *cmd)
 	CL_StopDownload(0, 0);
 
 	// we're really beginning a download now, so initialize stuff
-	strlcpy(cls.qw_downloadname, Cmd_Argv(cmd, 2), sizeof(cls.qw_downloadname));
+	dp_strlcpy(cls.qw_downloadname, Cmd_Argv(cmd, 2), sizeof(cls.qw_downloadname));
 	cls.qw_downloadmemorymaxsize = size;
 	cls.qw_downloadmemory = (unsigned char *) Mem_Alloc(cls.permanentmempool, cls.qw_downloadmemorymaxsize);
 	cls.qw_downloadnumber++;
@@ -1605,8 +1610,10 @@ CL_SignonReply
 An svc_signonnum has been received, perform a client side setup
 =====================
 */
-static void CL_SignonReply (void)
+static void CL_SignonReply(int signon_stage)
 {
+	CL_SetSignonStage_WithMsg(signon_stage);
+
 	Con_DPrintf("CL_SignonReply: %i\n", cls.signon);
 
 	switch (cls.signon)
@@ -1618,16 +1625,13 @@ static void CL_SignonReply (void)
 			// (so that the server can see the player name while downloading)
 			CL_SendPlayerInfo();
 
-			// execute cl_begindownloads next frame
-			// (after any commands added by svc_stufftext have been executed)
-			// when done with downloads the "prespawn" will be sent
-			Cbuf_AddText(cmd_local, "\ncl_begindownloads\n");
-
 			//MSG_WriteByte (&cls.netcon->message, clc_stringcmd);
 			//MSG_WriteString (&cls.netcon->message, "prespawn");
 		}
-		else // playing a demo...  make sure loading occurs as soon as possible
-			CL_BeginDownloads(false);
+		// execute cl_begindownloads next frame
+		// (after any commands added by svc_stufftext have been executed)
+		// when done with downloads the "prespawn" will be sent
+		Cbuf_AddText(cmd_local, "\ncl_begindownloads\n");
 		break;
 
 	case 2:
@@ -1673,7 +1677,7 @@ CL_ParseServerInfo
 */
 static void CL_ParseServerInfo (void)
 {
-	char *str;
+	const char *str;
 	int i;
 	protocolversion_t protocol;
 	int nummodels, numsounds;
@@ -1690,8 +1694,11 @@ static void CL_ParseServerInfo (void)
 	{
 		SCR_BeginLoadingPlaque(false);
 		S_StopAllSounds();
+		// prevent dlcache assets from the previous map from interfering with this one
+		FS_UnloadPacks_dlcache();
 		// free q3 shaders so that any newly downloaded shaders will be active
-		Mod_FreeQ3Shaders();
+		// bones_was_here: we free the q3 shaders later in CL_SignonReply
+		//Mod_FreeQ3Shaders();
 	}
 
 	// check memory integrity
@@ -1723,16 +1730,13 @@ static void CL_ParseServerInfo (void)
 
 	if (protocol == PROTOCOL_QUAKEWORLD)
 	{
-		char gamedir[1][MAX_QPATH];
-
 		cl.qw_servercount = MSG_ReadLong(&cl_message);
 
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
 		Con_Printf("server gamedir is %s\n", str);
-		strlcpy(gamedir[0], str, sizeof(gamedir[0]));
 
 		// change gamedir if needed
-		if (!FS_ChangeGameDirs(1, gamedir, true, false))
+		if (!FS_ChangeGameDirs(1, &str, false))
 			Host_Error("CL_ParseServerInfo: unable to switch to server specified gamedir");
 
 		cl.gametype = GAME_DEATHMATCH;
@@ -1747,7 +1751,7 @@ static void CL_ParseServerInfo (void)
 
 		// get the full level name
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
-		strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
+		dp_strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
 
 		// get the movevars that are defined in the qw protocol
 		cl.movevars_gravity            = MSG_ReadFloat(&cl_message);
@@ -1787,16 +1791,16 @@ static void CL_ParseServerInfo (void)
 		cl.loadfinished = false;
 
 		cls.state = ca_connected;
-		cls.signon = 1;
+		CL_SetSignonStage_WithMsg(1);
 
 		// note: on QW protocol we can't set up the gameworld until after
 		// downloads finish...
 		// (we don't even know the name of the map yet)
 		// this also means cl_autodemo does not work on QW protocol...
 
-		strlcpy(cl.worldname, "", sizeof(cl.worldname));
-		strlcpy(cl.worldnamenoextension, "", sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, "qw", sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldname, "", sizeof(cl.worldname));
+		dp_strlcpy(cl.worldnamenoextension, "", sizeof(cl.worldnamenoextension));
+		dp_strlcpy(cl.worldbasename, "qw", sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
 		Cvar_SetQuick(&cl_worldbasename, cl.worldbasename);
@@ -1824,7 +1828,7 @@ static void CL_ParseServerInfo (void)
 
 	// parse signon message
 		str = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
-		strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
+		dp_strlcpy (cl.worldmessage, str, sizeof(cl.worldmessage));
 
 	// seperate the printfs so the server message can have a color
 		if (cls.protocol != PROTOCOL_NEHAHRAMOVIE) // no messages when playing the Nehahra movie
@@ -1843,7 +1847,7 @@ static void CL_ParseServerInfo (void)
 				Host_Error ("Server sent too many model precaches");
 			if (strlen(str) >= MAX_QPATH)
 				Host_Error ("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-			strlcpy (cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
+			dp_strlcpy (cl.model_name[nummodels], str, sizeof (cl.model_name[nummodels]));
 		}
 		// parse sound precache list
 		for (numsounds=1 ; ; numsounds++)
@@ -1855,13 +1859,13 @@ static void CL_ParseServerInfo (void)
 				Host_Error("Server sent too many sound precaches");
 			if (strlen(str) >= MAX_QPATH)
 				Host_Error("Server sent a precache name of %i characters (max %i)", (int)strlen(str), MAX_QPATH - 1);
-			strlcpy (cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
+			dp_strlcpy (cl.sound_name[numsounds], str, sizeof (cl.sound_name[numsounds]));
 		}
 
 		// set the base name for level-specific things...  this gets updated again by CL_SetupWorldModel later
-		strlcpy(cl.worldname, cl.model_name[1], sizeof(cl.worldname));
+		dp_strlcpy(cl.worldname, cl.model_name[1], sizeof(cl.worldname));
 		FS_StripExtension(cl.worldname, cl.worldnamenoextension, sizeof(cl.worldnamenoextension));
-		strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
+		dp_strlcpy(cl.worldbasename, !strncmp(cl.worldnamenoextension, "maps/", 5) ? cl.worldnamenoextension + 5 : cl.worldnamenoextension, sizeof(cl.worldbasename));
 		Cvar_SetQuick(&cl_worldmessage, cl.worldmessage);
 		Cvar_SetQuick(&cl_worldname, cl.worldname);
 		Cvar_SetQuick(&cl_worldnamenoextension, cl.worldnamenoextension);
@@ -1926,7 +1930,8 @@ static void CL_ParseServerInfo (void)
 			}
 
 			// start a new demo file
-			dpsnprintf (demofile, sizeof(demofile), "%s_%s.dem", Sys_TimeString (cl_autodemo_nameformat.string), cl.worldbasename);
+			Sys_TimeString(vabuf, sizeof(vabuf), cl_autodemo_nameformat.string);
+			dpsnprintf (demofile, sizeof(demofile), "%s_%s.dem", vabuf, cl.worldbasename);
 
 			Con_Printf ("Auto-recording to %s.\n", demofile);
 
@@ -1943,7 +1948,7 @@ static void CL_ParseServerInfo (void)
 				cls.forcetrack = -1;
 				FS_Printf (cls.demofile, "%i\n", cls.forcetrack);
 				cls.demorecording = true;
-				strlcpy(cls.demoname, demofile, sizeof(cls.demoname));
+				dp_strlcpy(cls.demoname, demofile, sizeof(cls.demoname));
 				cls.demo_lastcsprogssize = -1;
 				cls.demo_lastcsprogscrc = -1;
 			}
@@ -3026,10 +3031,10 @@ static void CL_IPLog_Add(const char *address, const char *name, qbool checkexist
 	sz_name = strlen(name) + 1;
 	cl_iplog_items[cl_iplog_numitems].address = (char *) Mem_Alloc(cls.permanentmempool, sz_address);
 	cl_iplog_items[cl_iplog_numitems].name = (char *) Mem_Alloc(cls.permanentmempool, sz_name);
-	strlcpy(cl_iplog_items[cl_iplog_numitems].address, address, sz_address);
+	dp_strlcpy(cl_iplog_items[cl_iplog_numitems].address, address, sz_address);
 	// TODO: maybe it would be better to strip weird characters from name when
 	// copying it here rather than using a straight strcpy?
-	strlcpy(cl_iplog_items[cl_iplog_numitems].name, name, sz_name);
+	dp_strlcpy(cl_iplog_items[cl_iplog_numitems].name, name, sz_name);
 	cl_iplog_numitems++;
 	if (addtofile)
 	{
@@ -3281,9 +3286,10 @@ extern cvar_t host_timescale;
 extern cvar_t cl_lerpexcess;
 static void CL_NetworkTimeReceived(double newtime)
 {
+	cl.opt_inputs_since_update = 0;
 	cl.mtime[1] = cl.mtime[0];
 	cl.mtime[0] = newtime;
-	if (cl_nolerp.integer || cls.timedemo || cl.mtime[1] == cl.mtime[0] || cls.signon < SIGNONS)
+	if (cls.timedemo || cl.mtime[1] == cl.mtime[0] || cls.signon < SIGNONS)
 		cl.time = cl.mtime[1] = newtime;
 	else if (cls.demoplayback)
 	{
@@ -3306,27 +3312,32 @@ static void CL_NetworkTimeReceived(double newtime)
 				Con_DPrintf("--- cl.time > cl.mtime[0] (%f > %f ... %f)\n", cl.time, cl.mtime[1], cl.mtime[0]);
 		}
 
-		if (cl_nettimesyncboundmode.integer < 4)
+selectmode:
+		switch (cl_nettimesyncboundmode.integer)
 		{
+		default:
+			Cvar_SetQuick(&cl_nettimesyncboundmode, cl_nettimesyncboundmode.defstring);
+			goto selectmode;
+		case 1:
+		case 2:
+		case 3:
 			// doesn't make sense for modes > 3
 			cl.time += (cl.mtime[1] - cl.time) * bound(0, cl_nettimesyncfactor.value, 1);
 			timehigh = cl.mtime[1] + (cl.mtime[0] - cl.mtime[1]) * cl_nettimesyncboundtolerance.value;
-		}
-
-		switch (cl_nettimesyncboundmode.integer)
-		{
-		case 1:
-			cl.time = bound(cl.mtime[1], cl.time, cl.mtime[0]);
-			break;
-
-		case 2:
-			if (cl.time < cl.mtime[1] || cl.time > timehigh)
-				cl.time = cl.mtime[1];
-			break;
-
-		case 3:
-			if ((cl.time < cl.mtime[1] && cl.oldtime < cl.mtime[1]) || (cl.time > timehigh && cl.oldtime > timehigh))
-				cl.time = cl.mtime[1];
+			switch (cl_nettimesyncboundmode.integer)
+			{
+			case 1:
+				cl.time = bound(cl.mtime[1], cl.time, cl.mtime[0]);
+				break;
+			case 2:
+				if (cl.time < cl.mtime[1] || cl.time > timehigh)
+					cl.time = cl.mtime[1];
+				break;
+			case 3:
+				if ((cl.time < cl.mtime[1] && cl.oldtime < cl.mtime[1]) || (cl.time > timehigh && cl.oldtime > timehigh))
+					cl.time = cl.mtime[1];
+				break;
+			}
 			break;
 
 		case 4:
@@ -3432,6 +3443,7 @@ void CL_ParseServerMessage(void)
 	qbool	qwplayerupdatereceived;
 	qbool	strip_pqc;
 	char vabuf[1024];
+	size_t cl_readstring_len;
 
 	// LadyHavoc: moved demo message writing from before the packet parse to
 	// after the packet parse so that CL_Stop_f can be called by cl_autodemo
@@ -3505,7 +3517,7 @@ void CL_ParseServerMessage(void)
 				{
 					char description[32*64], logtemp[64];
 					int count;
-					strlcpy(description, "packet dump: ", sizeof(description));
+					dp_strlcpy(description, "packet dump: ", sizeof(description));
 					i = cmdcount - 32;
 					if (i < 0)
 						i = 0;
@@ -3514,7 +3526,7 @@ void CL_ParseServerMessage(void)
 					while(count > 0)
 					{
 						dpsnprintf(logtemp, sizeof(logtemp), "%3i:%s ", cmdlog[i], cmdlogname[i]);
-						strlcat(description, logtemp, sizeof(description));
+						dp_strlcat(description, logtemp, sizeof(description));
 						count--;
 						i++;
 						i &= 31;
@@ -3538,22 +3550,28 @@ void CL_ParseServerMessage(void)
 
 			case qw_svc_print:
 				i = MSG_ReadByte(&cl_message);
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				if (CL_ExaminePrintString(temp)) // look for anything interesting like player IP addresses or ping reports
 				{
 					if (i == 3) // chat
-						CSQC_AddPrintText(va(vabuf, sizeof(vabuf), "\1%s", temp));	//[515]: csqc
+					{
+						cl_readstring_len = dpsnprintf(vabuf, sizeof(vabuf), "\1%s", temp);
+						CSQC_AddPrintText(vabuf, cl_readstring_len);	//[515]: csqc
+					}
 					else
-						CSQC_AddPrintText(temp);
+						CSQC_AddPrintText(temp, cl_readstring_len);
 				}
 				break;
 
 			case qw_svc_centerprint:
-				CL_VM_Parse_CenterPrint(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_CenterPrint(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case qw_svc_stufftext:
-				CL_VM_Parse_StuffCmd(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_StuffCmd(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case qw_svc_damage:
@@ -3586,7 +3604,7 @@ void CL_ParseServerMessage(void)
 					Con_Printf ("svc_lightstyle >= MAX_LIGHTSTYLES");
 					break;
 				}
-				strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
+				dp_strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
 				cl.lightstyle[i].map[MAX_STYLESTRING - 1] = 0;
 				cl.lightstyle[i].length = (int)strlen(cl.lightstyle[i].map);
 				break;
@@ -3696,7 +3714,7 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case qw_svc_sellscreen:
-				Cmd_ExecuteString(cmd_local, "help", src_local, true);
+				Cmd_ExecuteString(cmd_local, "help", 4, src_local, true);
 				break;
 
 			case qw_svc_smallkick:
@@ -3767,20 +3785,14 @@ void CL_ParseServerMessage(void)
 				EntityFrameQW_CL_ReadFrame(false);
 				// first update is the final signon stage
 				if (cls.signon == SIGNONS - 1)
-				{
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				break;
 
 			case qw_svc_deltapacketentities:
 				EntityFrameQW_CL_ReadFrame(true);
 				// first update is the final signon stage
 				if (cls.signon == SIGNONS - 1)
-				{
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				break;
 
 			case qw_svc_maxspeed:
@@ -3840,11 +3852,8 @@ void CL_ParseServerMessage(void)
 				cmdlogname[cmdindex] = temp;
 				SHOWNET("fast update");
 				if (cls.signon == SIGNONS - 1)
-				{
 					// first update is the final signon stage
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				EntityFrameQuake_ReadEntity (cmd&127);
 				continue;
 			}
@@ -3865,7 +3874,7 @@ void CL_ParseServerMessage(void)
 				{
 					char description[32*64], tempdesc[64];
 					int count;
-					strlcpy (description, "packet dump: ", sizeof(description));
+					dp_strlcpy (description, "packet dump: ", sizeof(description));
 					i = cmdcount - 32;
 					if (i < 0)
 						i = 0;
@@ -3874,7 +3883,7 @@ void CL_ParseServerMessage(void)
 					while(count > 0)
 					{
 						dpsnprintf (tempdesc, sizeof (tempdesc), "%3i:%s ", cmdlog[i], cmdlogname[i]);
-						strlcat (description, tempdesc, sizeof (description));
+						dp_strlcat (description, tempdesc, sizeof (description));
 						count--;
 						i++;
 						i &= 31;
@@ -3917,17 +3926,20 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case svc_print:
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				if (CL_ExaminePrintString(temp)) // look for anything interesting like player IP addresses or ping reports
-					CSQC_AddPrintText(temp);	//[515]: csqc
+					CSQC_AddPrintText(temp, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_centerprint:
-				CL_VM_Parse_CenterPrint(MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)));	//[515]: csqc
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				CL_VM_Parse_CenterPrint(cl_readstring, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_stufftext:
-				temp = MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring));
+				cl_readstring_len = MSG_ReadString_len(&cl_message, cl_readstring, sizeof(cl_readstring));
+				temp = cl_readstring;
 				/* if(utf8_enable.integer)
 				{
 					strip_pqc = true;
@@ -3958,11 +3970,15 @@ void CL_ParseServerMessage(void)
 					if(*temp == 0x01)
 					{
 						++temp;
+						--cl_readstring_len;
 						while(*temp >= 0x01 && *temp <= 0x1F)
+						{
 							++temp;
+							--cl_readstring_len;
+						}
 					}
 				}
-				CL_VM_Parse_StuffCmd(temp);	//[515]: csqc
+				CL_VM_Parse_StuffCmd(temp, cl_readstring_len);	//[515]: csqc
 				break;
 
 			case svc_damage:
@@ -4007,7 +4023,7 @@ void CL_ParseServerMessage(void)
 					Con_Printf ("svc_lightstyle >= MAX_LIGHTSTYLES");
 					break;
 				}
-				strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
+				dp_strlcpy (cl.lightstyle[i].map,  MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.lightstyle[i].map));
 				cl.lightstyle[i].map[MAX_STYLESTRING - 1] = 0;
 				cl.lightstyle[i].length = (int)strlen(cl.lightstyle[i].map);
 				break;
@@ -4064,7 +4080,7 @@ void CL_ParseServerMessage(void)
 				i = MSG_ReadByte(&cl_message);
 				if (i >= cl.maxclients)
 					Host_Error ("CL_ParseServerMessage: svc_updatename >= cl.maxclients");
-				strlcpy (cl.scores[i].name, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.scores[i].name));
+				dp_strlcpy (cl.scores[i].name, MSG_ReadString(&cl_message, cl_readstring, sizeof(cl_readstring)), sizeof (cl.scores[i].name));
 				break;
 
 			case svc_updatefrags:
@@ -4135,8 +4151,7 @@ void CL_ParseServerMessage(void)
 				// reconnect somehow, so allow signon 1 even if at signon 1
 				if (i <= cls.signon && i != 1)
 					Host_Error ("Received signon %i when at %i", i, cls.signon);
-				cls.signon = i;
-				CL_SignonReply ();
+				CL_SignonReply(i);
 				break;
 
 			case svc_killedmonster:
@@ -4202,7 +4217,7 @@ void CL_ParseServerMessage(void)
 				break;
 
 			case svc_sellscreen:
-				Cmd_ExecuteString(cmd_local, "help", src_local, true);
+				Cmd_ExecuteString(cmd_local, "help", 4, src_local, true);
 				break;
 			case svc_hidelmp:
 				if (gamemode == GAME_TENEBRAE)
@@ -4240,11 +4255,8 @@ void CL_ParseServerMessage(void)
 				break;
 			case svc_entities:
 				if (cls.signon == SIGNONS - 1)
-				{
 					// first update is the final signon stage
-					cls.signon = SIGNONS;
-					CL_SignonReply ();
-				}
+					CL_SignonReply(SIGNONS);
 				if (cls.protocol == PROTOCOL_DARKPLACES1 || cls.protocol == PROTOCOL_DARKPLACES2 || cls.protocol == PROTOCOL_DARKPLACES3)
 					EntityFrame_CL_ReadFrame();
 				else if (cls.protocol == PROTOCOL_DARKPLACES4)

@@ -34,20 +34,6 @@ typedef struct server_static_s
 	qbool changelevel_issued;
 	/// server infostring
 	char serverinfo[MAX_SERVERINFO_STRING];
-	// performance data
-	float perf_cpuload;
-	float perf_lost;
-	float perf_offset_avg;
-	float perf_offset_max;
-	float perf_offset_sdev;
-	// temporary performance data accumulators
-	float perf_acc_realtime;
-	float perf_acc_sleeptime;
-	float perf_acc_lost;
-	float perf_acc_offset;
-	float perf_acc_offset_squared;
-	float perf_acc_offset_max;
-	int perf_acc_offset_samples;
 
 	// csqc stuff
 	unsigned char *csqc_progdata;
@@ -88,8 +74,24 @@ typedef struct server_s
 	protocolversion_t protocol;
 
 	double time;
-
 	double frametime;
+
+	unsigned int spawnframe; // signals SV_Frame() to reset its timers
+
+	// performance data
+	float perf_cpuload;
+	float perf_lost;
+	float perf_offset_avg;
+	float perf_offset_max;
+	float perf_offset_sdev;
+	// temporary performance data accumulators
+	float perf_acc_realtime;
+	float perf_acc_sleeptime;
+	float perf_acc_lost;
+	float perf_acc_offset;
+	float perf_acc_offset_squared;
+	float perf_acc_offset_max;
+	int perf_acc_offset_samples;
 
 	// used by PF_checkclient
 	int lastcheck;
@@ -103,10 +105,7 @@ typedef struct server_s
 	/// collision culling data
 	world_t world;
 
-	/// map name
-	char name[64]; // %s followed by entrance name
 	// variants of map name
-	char worldmessage[40]; // map title (not related to filename)
 	char worldbasename[MAX_QPATH]; // %s
 	char worldname[MAX_QPATH]; // maps/%s.bsp
 	char worldnamenoextension[MAX_QPATH]; // maps/%s
@@ -153,8 +152,7 @@ typedef struct server_s
 	sizebuf_t *writeentitiestoclient_msg;
 	vec3_t writeentitiestoclient_eyes[MAX_CLIENTNETWORKEYES];
 	int writeentitiestoclient_numeyes;
-	int writeentitiestoclient_pvsbytes;
-	unsigned char writeentitiestoclient_pvs[MAX_MAP_LEAFS/8];
+	unsigned char *writeentitiestoclient_pvs;
 	const entity_state_t *writeentitiestoclient_sendstates[MAX_EDICTS];
 	unsigned short writeentitiestoclient_csqcsendstates[MAX_EDICTS];
 
@@ -315,7 +313,7 @@ typedef struct client_s
 #define	MOVETYPE_ANGLENOCLIP	1
 #define	MOVETYPE_ANGLECLIP		2
 #define	MOVETYPE_WALK			3		///< gravity
-#define	MOVETYPE_STEP			4		///< gravity, special edge handling
+#define	MOVETYPE_STEP			4		///< gravity, special edge handling, special step based client side interpolation
 #define	MOVETYPE_FLY			5
 #define	MOVETYPE_TOSS			6		///< gravity
 #define	MOVETYPE_PUSH			7		///< no clip to world, push and crush
@@ -361,7 +359,7 @@ typedef struct client_s
 #define	FL_CONVEYOR				4
 #define	FL_CLIENT				8
 #define	FL_INWATER				16
-#define	FL_MONSTER				32
+#define	FL_MONSTER				32      ///< movement is smoothed on the client side by step based interpolation
 #define	FL_GODMODE				64
 #define	FL_NOTARGET				128
 #define	FL_ITEM					256
@@ -415,6 +413,7 @@ extern cvar_t sv_allowdownloads_archive;
 extern cvar_t sv_allowdownloads_config;
 extern cvar_t sv_allowdownloads_dlcache;
 extern cvar_t sv_allowdownloads_inarchive;
+extern cvar_t sv_areagrid_link_SOLID_NOT;
 extern cvar_t sv_areagrid_mingridsize;
 extern cvar_t sv_checkforpacketsduringsleep;
 extern cvar_t sv_clmovement_enable;
@@ -446,6 +445,7 @@ extern cvar_t sv_gameplayfix_easierwaterjump;
 extern cvar_t sv_gameplayfix_findradiusdistancetobox;
 extern cvar_t sv_gameplayfix_gravityunaffectedbyticrate;
 extern cvar_t sv_gameplayfix_grenadebouncedownslopes;
+extern cvar_t sv_gameplayfix_impactbeforeonground;
 extern cvar_t sv_gameplayfix_multiplethinksperframe;
 extern cvar_t sv_gameplayfix_noairborncorpse;
 extern cvar_t sv_gameplayfix_noairborncorpse_allowsuspendeditems;
@@ -465,10 +465,12 @@ extern cvar_t sv_gameplayfix_q1bsptracelinereportstexture;
 extern cvar_t sv_gameplayfix_unstickplayers;
 extern cvar_t sv_gameplayfix_unstickentities;
 extern cvar_t sv_gameplayfix_fixedcheckwatertransition;
+extern cvar_t sv_gameplayfix_nosquashentities;
 extern cvar_t sv_gravity;
 extern cvar_t sv_idealpitchscale;
 extern cvar_t sv_jumpstep;
 extern cvar_t sv_jumpvelocity;
+extern cvar_t sv_legacy_bbox_expand;
 extern cvar_t sv_maxairspeed;
 extern cvar_t sv_maxrate;
 extern cvar_t sv_maxspeed;
@@ -562,15 +564,6 @@ void SV_LinkEdict(prvm_edict_t *ent);
 void SV_LinkEdict_TouchAreaGrid(prvm_edict_t *ent);
 void SV_LinkEdict_TouchAreaGrid_Call(prvm_edict_t *touch, prvm_edict_t *ent); // if we detected a touch from another source
 
-/*! move an entity that is stuck by small amounts in various directions to try to nudge it back into the collision hull
- * returns true if it found a better place
- */
-qbool SV_UnstickEntity (prvm_edict_t *ent);
-/*! move an entity that is stuck out of the surface it is stuck in (can move large amounts)
- * returns true if it found a better place
- */
-qbool SV_NudgeOutOfSolid(prvm_edict_t *ent);
-
 /// calculates hitsupercontentsmask for a generic qc entity
 int SV_GenericHitSuperContentsMask(const prvm_edict_t *edict);
 /// traces a box move against worldmodel and all entities in the specified area
@@ -626,6 +619,6 @@ void SV_PreSpawn_f(cmd_state_t *cmd);
 void SV_Spawn_f(cmd_state_t *cmd);
 void SV_Begin_f(cmd_state_t *cmd);
 
-qbool SV_VM_ConsoleCommand (const char *text);
+qbool SV_VM_ConsoleCommand(const char *text, size_t textlen);
 
 #endif

@@ -51,8 +51,9 @@ dp_fonts_t dp_fonts;
 static mempool_t *fonts_mempool = NULL;
 
 cvar_t r_textshadow = {CF_CLIENT | CF_ARCHIVE, "r_textshadow", "0", "draws a shadow on all text to improve readability (note: value controls offset, 1 = 1 pixel, 1.5 = 1.5 pixels, etc)"};
-cvar_t r_textbrightness = {CF_CLIENT | CF_ARCHIVE, "r_textbrightness", "0", "additional brightness for text color codes (0 keeps colors as is, 1 makes them all white)"};
-cvar_t r_textcontrast = {CF_CLIENT | CF_ARCHIVE, "r_textcontrast", "1", "additional contrast for text color codes (1 keeps colors as is, 0 makes them all black)"};
+// these are also read by the dedicated server when sys_colortranslation > 1
+cvar_t r_textbrightness = {CF_SHARED | CF_ARCHIVE, "r_textbrightness", "0", "additional brightness for text color codes (0 keeps colors as is, 1 makes them all white)"};
+cvar_t r_textcontrast = {CF_SHARED | CF_ARCHIVE, "r_textcontrast", "1", "additional contrast for text color codes (1 keeps colors as is, 0 makes them all black)"};
 
 cvar_t r_font_postprocess_blur = {CF_CLIENT | CF_ARCHIVE, "r_font_postprocess_blur", "0", "font blur amount"};
 cvar_t r_font_postprocess_outline = {CF_CLIENT | CF_ARCHIVE, "r_font_postprocess_outline", "0", "font outline amount"};
@@ -61,6 +62,7 @@ cvar_t r_font_postprocess_shadow_y = {CF_CLIENT | CF_ARCHIVE, "r_font_postproces
 cvar_t r_font_postprocess_shadow_z = {CF_CLIENT | CF_ARCHIVE, "r_font_postprocess_shadow_z", "0", "font shadow Z shift amount, applied during blurring"};
 cvar_t r_font_hinting = {CF_CLIENT | CF_ARCHIVE, "r_font_hinting", "3", "0 = no hinting, 1 = light autohinting, 2 = full autohinting, 3 = full hinting"};
 cvar_t r_font_antialias = {CF_CLIENT | CF_ARCHIVE, "r_font_antialias", "1", "0 = monochrome, 1 = grey" /* , 2 = rgb, 3 = bgr" */};
+cvar_t r_font_always_reload = {CF_CLIENT | CF_ARCHIVE, "r_font_always_reload", "0", "reload a font even given the same loadfont command. useful for trying out different versions of the same font file"};
 cvar_t r_nearest_2d = {CF_CLIENT | CF_ARCHIVE, "r_nearest_2d", "0", "use nearest filtering on all 2d textures (including conchars)"};
 cvar_t r_nearest_conchars = {CF_CLIENT | CF_ARCHIVE, "r_nearest_conchars", "0", "use nearest filtering on conchars texture"};
 
@@ -142,7 +144,7 @@ cachepic_t *Draw_CachePic_Flags(const char *path, unsigned int cachepicflags)
 	Con_DPrintf("Draw_CachePic(\"%s\"): frame %i: loading pic%s\n", path, draw_frame, (cachepicflags & CACHEPICFLAG_NOTPERSISTENT) ? " notpersist" : "");
 	pic = cachepics + (numcachepics++);
 	memset(pic, 0, sizeof(*pic));
-	strlcpy (pic->name, path, sizeof(pic->name));
+	dp_strlcpy (pic->name, path, sizeof(pic->name));
 	// link into list
 	pic->chain = cachepichash[hashkey];
 	cachepichash[hashkey] = pic;
@@ -285,7 +287,7 @@ cachepic_t *Draw_NewPic(const char *picname, int width, int height, unsigned cha
 		Con_DPrintf("Draw_NewPic(\"%s\"): frame %i: creating new cachepic\n", picname, draw_frame);
 		pic = cachepics + (numcachepics++);
 		memset(pic, 0, sizeof(*pic));
-		strlcpy (pic->name, picname, sizeof(pic->name));
+		dp_strlcpy (pic->name, picname, sizeof(pic->name));
 		// link into list
 		pic->chain = cachepichash[hashkey];
 		cachepichash[hashkey] = pic;
@@ -335,7 +337,7 @@ void LoadFont(qbool override, const char *name, dp_font_t *fnt, float scale, flo
 
 	if(override || !fnt->texpath[0])
 	{
-		strlcpy(fnt->texpath, name, sizeof(fnt->texpath));
+		dp_strlcpy(fnt->texpath, name, sizeof(fnt->texpath));
 		// load the cvars when the font is FIRST loader
 		fnt->settings.scale = scale;
 		fnt->settings.voffset = voffset;
@@ -347,6 +349,7 @@ void LoadFont(qbool override, const char *name, dp_font_t *fnt, float scale, flo
 		fnt->settings.shadowy = r_font_postprocess_shadow_y.value;
 		fnt->settings.shadowz = r_font_postprocess_shadow_z.value;
 	}
+
 	// fix bad scale
 	if (fnt->settings.scale <= 0)
 		fnt->settings.scale = 1;
@@ -356,7 +359,7 @@ void LoadFont(qbool override, const char *name, dp_font_t *fnt, float scale, flo
 
 	if(fnt->ft2)
 	{
-		// clear freetype font
+		// we are going to reload. clear old ft2 data
 		Font_UnloadFont(fnt->ft2);
 		Mem_Free(fnt->ft2);
 		fnt->ft2 = NULL;
@@ -382,7 +385,7 @@ void LoadFont(qbool override, const char *name, dp_font_t *fnt, float scale, flo
 		if(!Draw_IsPicLoaded(fnt->pic))
 		{
 			fnt->pic = Draw_CachePic_Flags("gfx/conchars", CACHEPICFLAG_NOCOMPRESSION | (r_nearest_conchars.integer ? CACHEPICFLAG_NEAREST : 0));
-			strlcpy(widthfile, "gfx/conchars.width", sizeof(widthfile));
+			dp_strlcpy(widthfile, "gfx/conchars.width", sizeof(widthfile));
 		}
 		else
 			dpsnprintf(widthfile, sizeof(widthfile), "%s.width", fnt->fallbacks[i]);
@@ -458,7 +461,7 @@ void LoadFont(qbool override, const char *name, dp_font_t *fnt, float scale, flo
 			if (!map)
 				break;
 			for(ch = 0; ch < 256; ++ch)
-				map->width_of[ch] = Font_SnapTo(fnt->width_of[ch], 1/map->size);
+				fnt->width_of_ft2[i][ch] = Font_SnapTo(fnt->width_of[ch], 1/map->size);
 		}
 	}
 
@@ -491,7 +494,7 @@ dp_font_t *FindFont(const char *title, qbool allocate_new)
 		{
 			if(!strcmp(dp_fonts.f[i].title, ""))
 			{
-				strlcpy(dp_fonts.f[i].title, title, sizeof(dp_fonts.f[i].title));
+				dp_strlcpy(dp_fonts.f[i].title, title, sizeof(dp_fonts.f[i].title));
 				return &dp_fonts.f[i];
 			}
 		}
@@ -506,7 +509,7 @@ dp_font_t *FindFont(const char *title, qbool allocate_new)
 			if (dp_fonts.f[i].ft2)
 				dp_fonts.f[i].ft2->settings = &dp_fonts.f[i].settings;
 		// register a font in first expanded slot
-		strlcpy(dp_fonts.f[oldsize].title, title, sizeof(dp_fonts.f[oldsize].title));
+		dp_strlcpy(dp_fonts.f[oldsize].title, title, sizeof(dp_fonts.f[oldsize].title));
 		return &dp_fonts.f[oldsize];
 	}
 	return NULL;
@@ -514,10 +517,10 @@ dp_font_t *FindFont(const char *title, qbool allocate_new)
 
 static float snap_to_pixel_x(float x, float roundUpAt)
 {
-	float pixelpos = x * vid.width / vid_conwidth.value;
+	float pixelpos = x * vid.mode.width / vid_conwidth.value;
 	int snap = (int) pixelpos;
 	if (pixelpos - snap >= roundUpAt) ++snap;
-	return ((float)snap * vid_conwidth.value / vid.width);
+	return ((float)snap * vid_conwidth.value / vid.mode.width);
 	/*
 	x = (int)(x * vid.width / vid_conwidth.value);
 	x = (x * vid_conwidth.value / vid.width);
@@ -527,10 +530,10 @@ static float snap_to_pixel_x(float x, float roundUpAt)
 
 static float snap_to_pixel_y(float y, float roundUpAt)
 {
-	float pixelpos = y * vid.height / vid_conheight.value;
+	float pixelpos = y * vid.mode.height / vid_conheight.value;
 	int snap = (int) pixelpos;
 	if (pixelpos - snap > roundUpAt) ++snap;
-	return ((float)snap * vid_conheight.value / vid.height);
+	return ((float)snap * vid_conheight.value / vid.mode.height);
 	/*
 	y = (int)(y * vid.height / vid_conheight.value);
 	y = (y * vid_conheight.value / vid.height);
@@ -572,6 +575,16 @@ static void LoadFont_f(cmd_state_t *cmd)
 		Con_Printf("font function not found\n");
 		return;
 	}
+	else
+	{
+		if (strcmp(cmd->cmdline, f->cmdline) != 0 || r_font_always_reload.integer)
+			dp_strlcpy(f->cmdline, cmd->cmdline, MAX_FONT_CMDLINE);
+		else
+		{
+			Con_DPrintf("LoadFont: font %s is unchanged\n", Cmd_Argv(cmd, 1));
+			return;
+		}
+	}
 
 	if(Cmd_Argc(cmd) < 3)
 		filelist = "gfx/conchars";
@@ -592,8 +605,8 @@ static void LoadFont_f(cmd_state_t *cmd)
 		c = cm;
 	}
 
-	if(!c || (c - filelist) > MAX_QPATH)
-		strlcpy(mainfont, filelist, sizeof(mainfont));
+	if(!c || (c - filelist) >= MAX_QPATH)
+		dp_strlcpy(mainfont, filelist, sizeof(mainfont));
 	else
 	{
 		memcpy(mainfont, filelist, c - filelist);
@@ -617,9 +630,9 @@ static void LoadFont_f(cmd_state_t *cmd)
 			f->fallback_faces[i] = 0; // f->req_face; could make it stick to the default-font's face index
 			c = cm;
 		}
-		if(!c || (c-filelist) > MAX_QPATH)
+		if(!c || (c-filelist) >= MAX_QPATH)
 		{
-			strlcpy(f->fallbacks[i], filelist, sizeof(mainfont));
+			dp_strlcpy(f->fallbacks[i], filelist, sizeof(mainfont));
 		}
 		else
 		{
@@ -742,6 +755,7 @@ void GL_Draw_Init (void)
 	Cvar_RegisterVariable(&r_font_postprocess_shadow_z);
 	Cvar_RegisterVariable(&r_font_hinting);
 	Cvar_RegisterVariable(&r_font_antialias);
+	Cvar_RegisterVariable(&r_font_always_reload);
 	Cvar_RegisterVariable(&r_textshadow);
 	Cvar_RegisterVariable(&r_textbrightness);
 	Cvar_RegisterVariable(&r_textcontrast);
@@ -755,15 +769,15 @@ void GL_Draw_Init (void)
 	memset(dp_fonts.f, 0, sizeof(dp_font_t) * dp_fonts.maxsize);
 
 	// assign starting font names
-	strlcpy(FONT_DEFAULT->title, "default", sizeof(FONT_DEFAULT->title));
-	strlcpy(FONT_DEFAULT->texpath, "gfx/conchars", sizeof(FONT_DEFAULT->texpath));
-	strlcpy(FONT_CONSOLE->title, "console", sizeof(FONT_CONSOLE->title));
-	strlcpy(FONT_SBAR->title, "sbar", sizeof(FONT_SBAR->title));
-	strlcpy(FONT_NOTIFY->title, "notify", sizeof(FONT_NOTIFY->title));
-	strlcpy(FONT_CHAT->title, "chat", sizeof(FONT_CHAT->title));
-	strlcpy(FONT_CENTERPRINT->title, "centerprint", sizeof(FONT_CENTERPRINT->title));
-	strlcpy(FONT_INFOBAR->title, "infobar", sizeof(FONT_INFOBAR->title));
-	strlcpy(FONT_MENU->title, "menu", sizeof(FONT_MENU->title));
+	dp_strlcpy(FONT_DEFAULT->title, "default", sizeof(FONT_DEFAULT->title));
+	dp_strlcpy(FONT_DEFAULT->texpath, "gfx/conchars", sizeof(FONT_DEFAULT->texpath));
+	dp_strlcpy(FONT_CONSOLE->title, "console", sizeof(FONT_CONSOLE->title));
+	dp_strlcpy(FONT_SBAR->title, "sbar", sizeof(FONT_SBAR->title));
+	dp_strlcpy(FONT_NOTIFY->title, "notify", sizeof(FONT_NOTIFY->title));
+	dp_strlcpy(FONT_CHAT->title, "chat", sizeof(FONT_CHAT->title));
+	dp_strlcpy(FONT_CENTERPRINT->title, "centerprint", sizeof(FONT_CENTERPRINT->title));
+	dp_strlcpy(FONT_INFOBAR->title, "infobar", sizeof(FONT_INFOBAR->title));
+	dp_strlcpy(FONT_MENU->title, "menu", sizeof(FONT_MENU->title));
 	for(i = 0, j = 0; i < MAX_USERFONTS; ++i)
 		if(!FONT_USER(i)->title[0])
 			dpsnprintf(FONT_USER(i)->title, sizeof(FONT_USER(i)->title), "user%d", j++);
@@ -775,7 +789,7 @@ void GL_Draw_Init (void)
 void DrawQ_Start(void)
 {
 	r_refdef.draw2dstage = 1;
-	R_ResetViewRendering2D_Common(0, NULL, NULL, 0, 0, vid.width, vid.height, vid_conwidth.integer, vid_conheight.integer);
+	R_ResetViewRendering2D_Common(0, NULL, NULL, 0, 0, vid.mode.width, vid.mode.height, vid_conwidth.integer, vid_conheight.integer);
 }
 
 qbool r_draw2d_force = false;
@@ -836,7 +850,7 @@ void DrawQ_Fill(float x, float y, float width, float height, float red, float gr
 }
 
 /// color tag printing
-static const vec4_t string_colors[] =
+const vec4_t string_colors[] =
 {
 	// Quake3 colors
 	// LadyHavoc: why on earth is cyan before magenta in Quake3?
@@ -845,7 +859,8 @@ static const vec4_t string_colors[] =
 	{1.0, 0.0, 0.0, 1.0}, // red
 	{0.0, 1.0, 0.0, 1.0}, // green
 	{1.0, 1.0, 0.0, 1.0}, // yellow
-	{0.0, 0.0, 1.0, 1.0}, // blue
+	//{0.0, 0.0, 1.0, 1.0}, // blue
+	{0.05, 0.15, 1.0, 1.0}, // lighter blue, readable unlike the above
 	{0.0, 1.0, 1.0, 1.0}, // cyan
 	{1.0, 0.0, 1.0, 1.0}, // magenta
 	{1.0, 1.0, 1.0, 1.0}, // white
@@ -923,7 +938,6 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 	size_t bytes_left;
 	ft2_font_map_t *fontmap = NULL;
 	ft2_font_map_t *map = NULL;
-	//ft2_font_map_t *prevmap = NULL;
 	ft2_font_t *ft2 = fnt->ft2;
 	// float ftbase_x;
 	qbool snap = true;
@@ -975,7 +989,7 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 	//	x = snap_to_pixel_x(x, 0.4); // haha, it's 0 anyway
 
 	if (fontmap)
-		width_of = fontmap->width_of;
+		width_of = fnt->width_of_ft2[map_index];
 	else
 		width_of = fnt->width_of;
 
@@ -990,11 +1004,11 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 		if (ch == ' ' && !fontmap)
 		{
 			if(!least_one || i0) // never skip the first character
-			if(x + width_of[(int) ' '] * dw > maxwidth)
-			{
-				i = i0;
-				break; // oops, can't draw this
-			}
+				if(x + width_of[(int) ' '] * dw > maxwidth)
+				{
+					i = i0;
+					break; // oops, can't draw this
+				}
 			x += width_of[(int) ' '] * dw;
 			continue;
 		}
@@ -1039,29 +1053,22 @@ float DrawQ_TextWidth_UntilWidth_TrackColors_Scale(const char *text, size_t *max
 				map = ft2_oldstyle_map;
 			prevch = 0;
 			if(!least_one || i0) // never skip the first character
-			if(x + width_of[ch] * dw > maxwidth)
-			{
-				i = i0;
-				break; // oops, can't draw this
-			}
+				if(x + width_of[ch] * dw > maxwidth)
+				{
+					i = i0;
+					break; // oops, can't draw this
+				}
 			x += width_of[ch] * dw;
 		} else {
-			if (!map || map == ft2_oldstyle_map || ch < map->start || ch >= map->start + FONT_CHARS_PER_MAP)
+			if (!map || map == ft2_oldstyle_map || ch != prevch)
 			{
-				map = FontMap_FindForChar(fontmap, ch);
+				Font_GetMapForChar(ft2, map_index, ch, &map, &mapch);
 				if (!map)
-				{
-					if (!Font_LoadMapForIndex(ft2, map_index, ch, &map))
-						break;
-					if (!map)
-						break;
-				}
+					break;
 			}
-			mapch = ch - map->start;
 			if (prevch && Font_GetKerningForMap(ft2, map_index, w, h, prevch, ch, &kx, NULL))
 				x += kx * dw;
 			x += map->glyphs[mapch].advance_x * dw;
-			//prevmap = map;
 			prevch = ch;
 		}
 	}
@@ -1083,7 +1090,6 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 	Uchar ch, mapch, nextch;
 	Uchar prevch = 0; // used for kerning
 	int map_index = 0;
-	//ft2_font_map_t *prevmap = NULL; // the previous map
 	ft2_font_map_t *map = NULL;     // the currently used map
 	ft2_font_map_t *fontmap = NULL; // the font map for the size
 	float ftbase_y;
@@ -1142,11 +1148,11 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 		ftbase_y = snap_to_pixel_y(ftbase_y, 0.3);
 	}
 
-	pix_x = vid.width / vid_conwidth.value;
-	pix_y = vid.height / vid_conheight.value;
+	pix_x = vid.mode.width / vid_conwidth.value;
+	pix_y = vid.mode.height / vid_conheight.value;
 
 	if (fontmap)
-		width_of = fontmap->width_of;
+		width_of = fnt->width_of_ft2[map_index];
 	else
 		width_of = fnt->width_of;
 
@@ -1259,27 +1265,16 @@ float DrawQ_String_Scale(float startx, float starty, const char *text, size_t ma
 				Mod_Mesh_AddTriangle(mod, surf, e0, e2, e3);
 				x += width_of[ch] * dw;
 			} else {
-				if (!map || map == ft2_oldstyle_map || ch < map->start || ch >= map->start + FONT_CHARS_PER_MAP)
+				if (!map || map == ft2_oldstyle_map || ch != prevch)
 				{
-					// find the new map
-					map = FontMap_FindForChar(fontmap, ch);
+					Font_GetMapForChar(ft2, map_index, ch, &map, &mapch);
 					if (!map)
 					{
-						if (!Font_LoadMapForIndex(ft2, map_index, ch, &map))
-						{
-							shadow = -1;
-							break;
-						}
-						if (!map)
-						{
-							// this shouldn't happen
-							shadow = -1;
-							break;
-						}
+						shadow = -1;
+						break;
 					}
 				}
 
-				mapch = ch - map->start;
 				thisw = map->glyphs[mapch].advance_x;
 
 				//x += ftbase_x;
@@ -1414,11 +1409,11 @@ void DrawQ_Line (float width, float x1, float y1, float x2, float y2, float r, f
 	if (fabs(x2 - x1) > fabs(y2 - y1))
 	{
 		offsetx = 0;
-		offsety = 0.5f * width * vid_conheight.value / vid.height;
+		offsety = 0.5f * width * vid_conheight.value / vid.mode.height;
 	}
 	else
 	{
-		offsetx = 0.5f * width * vid_conwidth.value / vid.width;
+		offsetx = 0.5f * width * vid_conwidth.value / vid.mode.width;
 		offsety = 0;
 	}
 	surf = Mod_Mesh_AddSurface(mod, Mod_Mesh_GetTexture(mod, "white", 0, 0, MATERIALFLAG_WALL | MATERIALFLAG_VERTEXCOLOR | MATERIALFLAG_ALPHAGEN_VERTEX | MATERIALFLAG_ALPHA | MATERIALFLAG_BLENDED | MATERIALFLAG_NOSHADOW), true);
@@ -1445,7 +1440,7 @@ void DrawQ_SetClipArea(float x, float y, float width, float height)
 	{
 	case RENDERPATH_GL32:
 	case RENDERPATH_GLES2:
-		GL_Scissor(ix, vid.height - iy - ih, iw, ih);
+		GL_Scissor(ix, vid.mode.height - iy - ih, iw, ih);
 		break;
 	}
 

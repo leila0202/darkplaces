@@ -52,8 +52,7 @@ enum m_state_e {
 };
 
 extern enum m_state_e m_state;
-extern char m_return_reason[128];
-void M_Update_Return_Reason(const char *s);
+
 
 /*
 // hard-coded menus
@@ -72,7 +71,7 @@ void MP_Draw (void);
 void MP_ToggleMenu (int mode);
 void MP_Shutdown (void);*/
 
-qbool MP_ConsoleCommand(const char *text);
+qbool MP_ConsoleCommand(const char *text, size_t textlen);
 
 //
 // menu router
@@ -87,6 +86,9 @@ extern void (*MR_ToggleMenu) (int mode);
 extern void (*MR_Shutdown) (void);
 extern void (*MR_NewMap) (void);
 extern int (*MR_GetServerListEntryCategory) (const struct serverlist_entry_s *entry);
+
+// menu QC error handling
+extern jmp_buf mp_abort;
 
 typedef struct video_resolution_s
 {

@@ -3,10 +3,22 @@ obj/
 *.o
 *.i
 *.s
+
+# MSVC build objects
+Debug-darkplaces-sdl2-vs*/
+Release-darkplaces-sdl2-vs*/
+*.obj
+*.tlog
+# MSVC NuGet packages, VS downloads them automatically.
+# Other platforms also provide SDL2 headers rather than storing old ones here.
+packages/
+
 ChangeLog
 darkplaces-agl
 darkplaces-glx
 darkplaces-sdl
+darkplaces-wasm.html
+darkplaces-wasm.js
 darkplaces-dedicated
 gmon.out
 *.ncb
@@ -31,6 +43,13 @@ Makefile.win
 *.pdb
 *.lib
 *.exp
+
+# emscripten
+build-obj/
+emsdk/
+docs/output/
+wasm/preload/*
+!wasm/preload/runhere
 base/a0.sav
 base/autoexec.cfg
 base/bouncegrid.txt

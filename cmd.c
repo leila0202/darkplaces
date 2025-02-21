@@ -74,11 +74,13 @@ Cmd_Defer_f
 Cause a command to be executed after a delay.
 ============
 */
-static cmd_input_t *Cbuf_LinkGet(cmd_buf_t *cbuf, cmd_input_t *existing);
+static void Cbuf_ParseText(cmd_state_t *cmd, llist_t *head, cmd_input_t *existing, const char *text, qbool allowpending);
+static void Cbuf_LinkString(cmd_state_t *cmd, llist_t *head, cmd_input_t *existing, const char *text, qbool leavepending, unsigned int cmdsize);
 static void Cmd_Defer_f (cmd_state_t *cmd)
 {
 	cmd_input_t *current;
 	cmd_buf_t *cbuf = cmd->cbuf;
+	unsigned int cmdsize;
 
 	if(Cmd_Argc(cmd) == 1)
 	{
@@ -93,25 +95,19 @@ static void Cmd_Defer_f (cmd_state_t *cmd)
 	else if(Cmd_Argc(cmd) == 2 && !strcasecmp("clear", Cmd_Argv(cmd, 1)))
 	{
 		while(!List_Is_Empty(&cbuf->deferred))
-			List_Move_Tail(cbuf->deferred.next, &cbuf->free);
-	}
-	else if(Cmd_Argc(cmd) == 3)
-	{
-		const char *text = Cmd_Argv(cmd, 2);
-		current = Cbuf_LinkGet(cbuf, NULL);
-		current->length = strlen(text);
-		current->source = cmd;
-		current->delay = atof(Cmd_Argv(cmd, 1));
-
-		if(current->size < current->length)
 		{
-			current->text = (char *)Mem_Realloc(cbuf_mempool, current->text, current->length + 1);
-			current->size = current->length;
+			cbuf->size -= List_Entry(cbuf->deferred.next, cmd_input_t, list)->length;
+			List_Move_Tail(cbuf->deferred.next, &cbuf->free);
 		}
+	}
+	else if(Cmd_Argc(cmd) == 3 && (cmdsize = strlen(Cmd_Argv(cmd, 2))) )
+	{
+		Cbuf_Lock(cbuf);
 
-		strlcpy(current->text, text, current->length + 1);
+		Cbuf_LinkString(cmd, &cbuf->deferred, NULL, Cmd_Argv(cmd, 2), false, cmdsize);
+		List_Entry(cbuf->deferred.prev, cmd_input_t, list)->delay = atof(Cmd_Argv(cmd, 1));
 
-		List_Move_Tail(&current->list, &cbuf->deferred);
+		Cbuf_Unlock(cbuf);
 	}
 	else
 	{
@@ -122,229 +118,140 @@ static void Cmd_Defer_f (cmd_state_t *cmd)
 }
 
 /*
-============
-Cmd_Centerprint_f
-
-Print something to the center of the screen using SCR_Centerprint
-============
-*/
-static void Cmd_Centerprint_f (cmd_state_t *cmd)
-{
-	char msg[MAX_INPUTLINE];
-	unsigned int i, c, p;
-	c = Cmd_Argc(cmd);
-	if(c >= 2)
-	{
-		strlcpy(msg, Cmd_Argv(cmd,1), sizeof(msg));
-		for(i = 2; i < c; ++i)
-		{
-			strlcat(msg, " ", sizeof(msg));
-			strlcat(msg, Cmd_Argv(cmd, i), sizeof(msg));
-		}
-		c = (unsigned int)strlen(msg);
-		for(p = 0, i = 0; i < c; ++i)
-		{
-			if(msg[i] == '\\')
-			{
-				if(msg[i+1] == 'n')
-					msg[p++] = '\n';
-				else if(msg[i+1] == '\\')
-					msg[p++] = '\\';
-				else {
-					msg[p++] = '\\';
-					msg[p++] = msg[i+1];
-				}
-				++i;
-			} else {
-				msg[p++] = msg[i];
-			}
-		}
-		msg[p] = '\0';
-		SCR_CenterPrint(msg);
-	}
-}
-
-/*
 =============================================================================
 
 						COMMAND BUFFER
 
+ * The Quake command-line is super basic. It can be entered in the console
+ * or in config files. A semicolon is used to terminate a command and chain
+ * them together. Otherwise, a newline delineates command input.
+ *
+ * In most engines, the Quake command-line is a simple linear text buffer that
+ * is parsed when it executes. In Darkplaces, we use a linked list of command
+ * input and parse the input on the spot.
+ *
+ * This was done because Darkplaces allows multiple command interpreters on the
+ * same thread. Previously, each interpreter maintained its own buffer and this
+ * caused problems related to execution order, and maintaining a single simple
+ * buffer for all interpreters makes it non-trivial to keep track of which
+ * command should execute on which interpreter.
+
 =============================================================================
 */
 
-static cmd_input_t *Cbuf_LinkGet(cmd_buf_t *cbuf, cmd_input_t *existing)
+/*
+============
+Cbuf_NodeGet
+
+Returns an existing buffer node for appending or reuse, or allocates a new one
+============
+*/
+static cmd_input_t *Cbuf_NodeGet(cmd_buf_t *cbuf, cmd_input_t *existing)
 {
-	cmd_input_t *ret = NULL;
+	cmd_input_t *node;
 	if(existing && existing->pending)
-		ret = existing;
+		node = existing;
 	else if(!List_Is_Empty(&cbuf->free))
 	{
-		ret = List_Entry(cbuf->free.next, cmd_input_t, list);
-		ret->length = 0;
-		ret->pending = false;
+		node = List_Entry(cbuf->free.next, cmd_input_t, list);
+		node->length = node->pending = 0;
 	}
-	return ret;
-}
-
-static cmd_input_t *Cmd_AllocInputNode(void)
-{
-	cmd_input_t *node = (cmd_input_t *)Mem_Alloc(cbuf_mempool, sizeof(cmd_input_t));
-	node->list.prev = node->list.next = &node->list;
-	node->size = node->length = node->pending = 0;
+	else
+	{
+		node = (cmd_input_t *)Mem_Alloc(cbuf_mempool, sizeof(cmd_input_t));
+		node->list.prev = node->list.next = &node->list;
+		node->size = node->length = node->pending = 0;
+	}
 	return node;
 }
 
+/*
+============
+Cbuf_LinkString
 
-// Cloudwalk FIXME: The entire design of this thing is overly complicated.
-// We could very much safely have one input node per line whether or not
-// the command was terminated. We don't need to split up input nodes per command
-// executed.
-static size_t Cmd_ParseInput (cmd_input_t **output, char **input)
+Copies a command string into a buffer node.
+The input should not be null-terminated, the output will be.
+============
+*/
+static void Cbuf_LinkString(cmd_state_t *cmd, llist_t *head, cmd_input_t *existing, const char *text, qbool leavepending, unsigned int cmdsize)
 {
-	size_t pos, cmdsize = 0, start = 0;
-	qbool command = false, lookahead = false;
-	qbool quotes = false, comment = false;
-	qbool escaped = false;
+	cmd_buf_t *cbuf = cmd->cbuf;
+	cmd_input_t *node = Cbuf_NodeGet(cbuf, existing);
+	unsigned int offset = node->length; // > 0 if(pending)
 
-	/*
-	 * The Quake command-line is super basic. It can be entered in the console
-	 * or in config files. A semicolon is used to terminate a command and chain
-	 * them together. Otherwise, a newline delineates command input.
-	 * 
-	 * In most engines, the Quake command-line is a simple linear text buffer that
-	 * is parsed when it executes. In Darkplaces, we use a linked list of command
-	 * input and parse the input on the spot.
-	 * 
-	 * This was done because Darkplaces allows multiple command interpreters on the
-	 * same thread. Previously, each interpreter maintained its own buffer and this
-	 * caused problems related to execution order, and maintaining a single simple
-	 * buffer for all interpreters makes it non-trivial to keep track of which
-	 * command should execute on which interpreter.
-	 */
-
-	// Run until command and lookahead are both true, or until we run out of input.
-	for (pos = 0; (*input)[pos]; pos++)
+	// node will match existing if its text was pending continuation
+	if(node != existing)
 	{
-		// Look for newlines and semicolons. Ignore semicolons in quotes.
-		switch((*input)[pos])
-		{
-		case '\r':
-		case '\n':
-			command = false;
-			comment = false;
-			break;
-		default: 
-			if(!comment) // Not a newline so far. Still not a valid command yet.
-			{
-				if(!quotes && (*input)[pos] == ';') // Ignore semicolons in quotes.
-					command = false;
-				else if (ISCOMMENT((*input), pos)) // Comments
-				{
-					comment = true;
-					command = false;
-				}
-				else
-				{
-					command = true;
-					if(!lookahead)
-					{
-						if(!cmdsize)
-							start = pos;
-						cmdsize++;
-					}
-
-					switch((*input)[pos])
-					{
-					case '"':
-						if (!escaped)
-							quotes = !quotes;
-						else
-							escaped = false;
-						break;
-					case '\\':
-						if (!escaped && quotes)
-							escaped = true;
-						else if (escaped)
-							escaped = false;
-						break;
-					}
-				}
-			}
-		}
-		if(cmdsize && !command)
-			lookahead = true;
-
-		if(command && lookahead)
-			break;
+		node->source = cmd;
+		List_Move_Tail(&node->list, head);
 	}
 
-	if(cmdsize)
+	node->length += cmdsize;
+	if(node->size < node->length)
 	{
-		size_t offset = 0;
-
-		if(!*output)
-			*output = Cmd_AllocInputNode();
-
-		// Append, since this input line hasn't closed yet.
-		if((*output)->pending)
-			offset = (*output)->length;
-
-		(*output)->length += cmdsize;
-
-		if((*output)->size < (*output)->length)
-		{
-			(*output)->text = (char *)Mem_Realloc(cbuf_mempool, (*output)->text, (*output)->length + 1);
-			(*output)->size = (*output)->length;
-		}
-
-		strlcpy(&(*output)->text[offset], &(*input)[start], cmdsize + 1);
-		
-		/*
-		 * If we were still looking ahead by the time we broke from the loop, the command input
-		 * hasn't terminated yet and we're still expecting more, so keep this node open for appending later.
-		 */
-		(*output)->pending = !lookahead;
+		node->text = (char *)Mem_Realloc(cbuf_mempool, node->text, node->length + 1);
+		node->size = node->length;
 	}
+	cbuf->size += cmdsize;
 
-	// Set input to its new position. Can be NULL.
-	*input = &(*input)[pos];
-
-	return cmdsize;
+	dp_ustr2stp(&node->text[offset], node->length + 1, text, cmdsize);
+	//Con_Printf("^5Cbuf_LinkString(): %s `^7%s^5`\n", node->pending ? "append" : "new", &node->text[offset]);
+	node->pending = leavepending;
 }
 
-// Cloudwalk: Not happy with this, but it works.
-static void Cbuf_LinkCreate(cmd_state_t *cmd, llist_t *head, cmd_input_t *existing, const char *text)
+/*
+============
+Cbuf_ParseText
+
+Parses text to isolate command strings for linking into the buffer
+separators: \n \r or unquoted and uncommented ';'
+============
+*/
+static void Cbuf_ParseText(cmd_state_t *cmd, llist_t *head, cmd_input_t *existing, const char *text, qbool allowpending)
 {
-	char *in = (char *)&text[0];
-	cmd_buf_t *cbuf = cmd->cbuf;
-	size_t totalsize = 0, newsize = 0;
-	cmd_input_t *current = NULL;
+	unsigned int cmdsize = 0, start = 0, pos;
+	qbool quotes = false, comment = false;
 
-	// Slide the pointer down until we reach the end
-	while(*in)
+	for (pos = 0; text[pos]; ++pos)
 	{
-		// Check if the current node is still accepting input (input line hasn't terminated)
-		current = Cbuf_LinkGet(cbuf, existing);
-		newsize = Cmd_ParseInput(&current, &in);
-
-		// Valid command
-		if(newsize)
+		switch(text[pos])
 		{
-			// current will match existing if the input line hasn't terminated yet
-			if(current != existing)
-			{
-				current->source = cmd;
-				List_Move_Tail(&current->list, head);
-			}
+			case ';':
+				if (comment || quotes)
+					break;
+			case '\r':
+			case '\n':
+				comment = false;
+				quotes = false; // matches div0-stable
+				if (cmdsize)
+				{
+					Cbuf_LinkString(cmd, head, existing, &text[start], false, cmdsize);
+					cmdsize = 0;
+				}
+				else if (existing && existing->pending) // all I got was this lousy \n
+					existing->pending = false;
+				continue; // don't increment cmdsize
 
-			totalsize += newsize;
+			case '/':
+				if (!quotes && text[pos + 1] == '/' && (pos == 0 || ISWHITESPACE(text[pos - 1])))
+					comment = true;
+				break;
+			case '"':
+				if (!comment && (pos == 0 || text[pos - 1] != '\\'))
+					quotes = !quotes;
+				break;
 		}
-		else if (current == existing && !totalsize)
-			current->pending = false;
-		current = NULL;
+
+		if (!comment)
+		{
+			if (!cmdsize)
+				start = pos;
+			++cmdsize;
+		}
 	}
 
-	cbuf->size += totalsize;
+	if (cmdsize) // the line didn't end yet but we do have a string
+		Cbuf_LinkString(cmd, head, existing, &text[start], allowpending, cmdsize);
 }
 
 /*
@@ -360,16 +267,18 @@ void Cbuf_AddText (cmd_state_t *cmd, const char *text)
 	cmd_buf_t *cbuf = cmd->cbuf;
 	llist_t llist = {&llist, &llist};
 
+	if (cbuf->size + l > cbuf->maxsize)
+	{
+		Con_Printf(CON_WARN "Cbuf_AddText: input too large, %luKB ought to be enough for anybody.\n", (unsigned long)(cbuf->maxsize / 1024));
+		return;
+	}
+
 	Cbuf_Lock(cbuf);
 
-	if (cbuf->maxsize - cbuf->size <= l)
-		Con_Print("Cbuf_AddText: overflow\n");
-	else
-	{
-		Cbuf_LinkCreate(cmd, &llist, (List_Is_Empty(&cbuf->start) ? NULL : List_Entry(cbuf->start.prev, cmd_input_t, list)), text);
-		if(!List_Is_Empty(&llist))
-			List_Splice_Tail(&llist, &cbuf->start);
-	}
+	// If the string terminates but the (last) line doesn't, the node will be left in the pending state (to be continued).
+	Cbuf_ParseText(cmd, &llist, (List_Is_Empty(&cbuf->start) ? NULL : List_Entry(cbuf->start.prev, cmd_input_t, list)), text, true);
+	List_Splice_Tail(&llist, &cbuf->start);
+
 	Cbuf_Unlock(cbuf);
 }
 
@@ -378,7 +287,6 @@ void Cbuf_AddText (cmd_state_t *cmd, const char *text)
 Cbuf_InsertText
 
 Adds command text immediately after the current command
-FIXME: actually change the command buffer to do less copying
 ============
 */
 void Cbuf_InsertText (cmd_state_t *cmd, const char *text)
@@ -387,17 +295,19 @@ void Cbuf_InsertText (cmd_state_t *cmd, const char *text)
 	llist_t llist = {&llist, &llist};
 	size_t l = strlen(text);
 
+	if (cbuf->size + l > cbuf->maxsize)
+	{
+		Con_Printf(CON_WARN "Cbuf_InsertText: input too large, %luKB ought to be enough for anybody.\n", (unsigned long)(cbuf->maxsize / 1024));
+		return;
+	}
+
 	Cbuf_Lock(cbuf);
 
-	// we need to memmove the existing text and stuff this in before it...
-	if (cbuf->size + l >= cbuf->maxsize)
-		Con_Print("Cbuf_InsertText: overflow\n");
-	else
-	{
-		Cbuf_LinkCreate(cmd, &llist, (List_Is_Empty(&cbuf->start) ? NULL : List_Entry(cbuf->start.next, cmd_input_t, list)), text);
-		if(!List_Is_Empty(&llist))
-			List_Splice(&llist, &cbuf->start);
-	}
+	// bones_was_here assertion: when prepending to the buffer it never makes sense to leave node(s) in the `pending` state,
+	// it would have been impossible to append to such text later in the old raw text buffer,
+	// and allowing it causes bugs when .cfg files lack \n at EOF (see: https://gitlab.com/xonotic/darkplaces/-/issues/378).
+	Cbuf_ParseText(cmd, &llist, (List_Is_Empty(&cbuf->start) ? NULL : List_Entry(cbuf->start.next, cmd_input_t, list)), text, false);
+	List_Splice(&llist, &cbuf->start);
 
 	Cbuf_Unlock(cbuf);
 }
@@ -409,25 +319,25 @@ Cbuf_Execute_Deferred --blub
 */
 static void Cbuf_Execute_Deferred (cmd_buf_t *cbuf)
 {
-	cmd_input_t *current;
-	double eat;
+	cmd_input_t *current, *n;
+	vec_t eat;
 
 	if (host.realtime - cbuf->deferred_oldtime < 0 || host.realtime - cbuf->deferred_oldtime > 1800)
 		cbuf->deferred_oldtime = host.realtime;
 	eat = host.realtime - cbuf->deferred_oldtime;
-	if (eat < (1.0 / 120.0))
+	if (eat < 1.0/128.0)
 		return;
 	cbuf->deferred_oldtime = host.realtime;
 
-	List_For_Each_Entry(current, &cbuf->deferred, cmd_input_t, list)
+	List_For_Each_Entry_Safe(current, n, &cbuf->deferred, cmd_input_t, list)
 	{
 		current->delay -= eat;
 		if(current->delay <= 0)
 		{
-			cbuf->size += current->length;
-			List_Move(&current->list, &cbuf->start);
-			// We must return and come back next frame or the engine will freeze. Fragile... like glass :3
-			return;
+			Cbuf_AddText(current->source, current->text); // parse deferred string and append its cmdstring(s)
+			List_Entry(cbuf->start.prev, cmd_input_t, list)->pending = false; // faster than div0-stable's Cbuf_AddText(";\n");
+			List_Move_Tail(&current->list, &cbuf->free); // make deferred string memory available for reuse
+			cbuf->size -= current->length;
 		}
 	}
 }
@@ -437,12 +347,11 @@ static void Cbuf_Execute_Deferred (cmd_buf_t *cbuf)
 Cbuf_Execute
 ============
 */
-static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *outtext, unsigned maxoutlen, cmd_alias_t *alias );
+extern qbool prvm_runawaycheck;
 void Cbuf_Execute (cmd_buf_t *cbuf)
 {
 	cmd_input_t *current;
-	char preprocessed[MAX_INPUTLINE];
-	char *firstchar;
+	unsigned int i = 0;
 
 	// LadyHavoc: making sure the tokenizebuffer doesn't get filled up by repeated crashes
 	cbuf->tokenizebufferpos = 0;
@@ -455,10 +364,7 @@ void Cbuf_Execute (cmd_buf_t *cbuf)
 		 * can insert data at the beginning of the text buffer
 		 */
 		current = List_Entry(cbuf->start.next, cmd_input_t, list);
-		
-		// Recycle memory so using WASD doesn't cause a malloc and free
-		List_Move_Tail(&current->list, &cbuf->free);
-		
+
 		/*
 		 * Assume we're rolling with the current command-line and
 		 * always set this false because alias expansion or cbuf insertion
@@ -466,24 +372,10 @@ void Cbuf_Execute (cmd_buf_t *cbuf)
 		 */
 		current->pending = false;
 
+		Cmd_PreprocessAndExecuteString(current->source, current->text, current->length, src_local, false);
 		cbuf->size -= current->length;
-
-		firstchar = current->text;
-		while(*firstchar && ISWHITESPACE(*firstchar))
-			++firstchar;
-		if((strncmp(firstchar, "alias", 5)   || !ISWHITESPACE(firstchar[5])) &&
-		   (strncmp(firstchar, "bind", 4)    || !ISWHITESPACE(firstchar[4])) &&
-		   (strncmp(firstchar, "in_bind", 7) || !ISWHITESPACE(firstchar[7])))
-		{
-			if(Cmd_PreprocessString(current->source, current->text, preprocessed, sizeof(preprocessed), NULL ))
-				Cmd_ExecuteString(current->source, preprocessed, src_local, false);
-		}
-		else
-		{
-			Cmd_ExecuteString (current->source, current->text, src_local, false);
-		}
-
-		current = NULL;
+		// Recycle memory so using WASD doesn't cause a malloc and free
+		List_Move_Tail(&current->list, &cbuf->free);
 
 		if (cbuf->wait)
 		{
@@ -493,6 +385,12 @@ void Cbuf_Execute (cmd_buf_t *cbuf)
 			 */
 			cbuf->wait = false;
 			break;
+		}
+
+		if (++i == 1000000 && prvm_runawaycheck)
+		{
+			Con_Printf(CON_WARN "Cbuf_Execute: runaway loop counter hit limit of %d commands, clearing command buffers!\n", i);
+			Cbuf_Clear(cbuf);
 		}
 	}
 }
@@ -508,8 +406,12 @@ static void Cbuf_Frame_Input(void)
 {
 	char *line;
 
-	while ((line = Sys_ConsoleInput()))
-			Cbuf_AddText(cmd_local, line);
+	if ((line = Sys_ConsoleInput()))
+	{
+		// bones_was_here: prepending allows a loop such as `alias foo "bar; wait; foo"; foo`
+		// to be broken with an alias or unalias command
+		Cbuf_InsertText(cmd_local, line);
+	}
 }
 
 void Cbuf_Frame(cmd_buf_t *cbuf)
@@ -529,6 +431,15 @@ void Cbuf_Frame(cmd_buf_t *cbuf)
 	}
 
 //	R_TimeReport("console");
+}
+
+void Cbuf_Clear(cmd_buf_t *cbuf)
+{
+	while (!List_Is_Empty(&cbuf->start))
+		List_Move_Tail(cbuf->start.next, &cbuf->free);
+	while (!List_Is_Empty(&cbuf->deferred))
+		List_Move_Tail(cbuf->deferred.next, &cbuf->free);
+	cbuf->size = 0;
 }
 
 /*
@@ -620,7 +531,7 @@ static void Cmd_Exec(cmd_state_t *cmd, const char *filename)
 	f = (char *)FS_LoadFile (filename, tempmempool, false, NULL);
 	if (!f)
 	{
-		Con_Printf("couldn't exec %s\n",filename);
+		Con_Printf(CON_WARN "couldn't exec %s\n",filename);
 		return;
 	}
 	Con_Printf("execing %s\n",filename);
@@ -637,116 +548,106 @@ static void Cmd_Exec(cmd_state_t *cmd, const char *filename)
 	if (isdefaultcfg)
 	{
 		// special defaults for specific games go here, these execute before default.cfg
-		// Nehahra pushable crates malfunction in some levels if this is on
-		// Nehahra NPC AI is confused by blowupfallenzombies
+		// and after gamegroup defaults (see below)
 		switch(gamemode)
 		{
-		case GAME_NORMAL:
-			Cbuf_InsertText(cmd, "\n"
-"sv_gameplayfix_blowupfallenzombies 0\n"
-"sv_gameplayfix_findradiusdistancetobox 0\n"
-"sv_gameplayfix_grenadebouncedownslopes 0\n"
-"sv_gameplayfix_slidemoveprojectiles 0\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 0\n"
-"sv_gameplayfix_setmodelrealbox 0\n"
-"sv_gameplayfix_droptofloorstartsolid 0\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 0\n"
-"sv_gameplayfix_noairborncorpse 0\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 0\n"
-"sv_gameplayfix_easierwaterjump 0\n"
-"sv_gameplayfix_delayprojectiles 0\n"
-"sv_gameplayfix_multiplethinksperframe 0\n"
-"sv_gameplayfix_fixedcheckwatertransition 0\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 0\n"
-"sv_gameplayfix_swiminbmodels 0\n"
-"sv_gameplayfix_downtracesupportsongroundflag 0\n"
-"sys_ticrate 0.01388889\n"
-"r_shadow_gloss 1\n"
-"r_shadow_bumpscale_basetexture 0\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
-				);
-			break;
 		case GAME_NEHAHRA:
 			Cbuf_InsertText(cmd, "\n"
-"sv_gameplayfix_blowupfallenzombies 0\n"
-"sv_gameplayfix_findradiusdistancetobox 0\n"
-"sv_gameplayfix_grenadebouncedownslopes 0\n"
-"sv_gameplayfix_slidemoveprojectiles 0\n"
+// Nehahra pushable crates malfunction in some levels if this is on
 "sv_gameplayfix_upwardvelocityclearsongroundflag 0\n"
-"sv_gameplayfix_setmodelrealbox 0\n"
-"sv_gameplayfix_droptofloorstartsolid 0\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 0\n"
-"sv_gameplayfix_noairborncorpse 0\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 0\n"
-"sv_gameplayfix_easierwaterjump 0\n"
-"sv_gameplayfix_delayprojectiles 0\n"
-"sv_gameplayfix_multiplethinksperframe 0\n"
-"sv_gameplayfix_fixedcheckwatertransition 0\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 0\n"
-"sv_gameplayfix_swiminbmodels 0\n"
-"sv_gameplayfix_downtracesupportsongroundflag 0\n"
-"sys_ticrate 0.01388889\n"
-"r_shadow_gloss 1\n"
-"r_shadow_bumpscale_basetexture 0\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
+// Nehahra NPC AI is confused by blowupfallenzombies
+"sv_gameplayfix_blowupfallenzombies 0\n"
 				);
 			break;
-		// hipnotic mission pack has issues in their 'friendly monster' ai, which seem to attempt to attack themselves for some reason when findradius() returns non-solid entities.
-		// hipnotic mission pack has issues with bobbing water entities 'jittering' between different heights on alternate frames at the default 0.0138889 ticrate, 0.02 avoids this issue
-		// hipnotic mission pack has issues in their proximity mine sticking code, which causes them to bounce off.
 		case GAME_HIPNOTIC:
 		case GAME_QUOTH:
 			Cbuf_InsertText(cmd, "\n"
+// hipnotic mission pack has issues in their 'friendly monster' ai, which seem to attempt to attack themselves for some reason when findradius() returns non-solid entities.
 "sv_gameplayfix_blowupfallenzombies 0\n"
-"sv_gameplayfix_findradiusdistancetobox 0\n"
-"sv_gameplayfix_grenadebouncedownslopes 0\n"
-"sv_gameplayfix_slidemoveprojectiles 0\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 0\n"
-"sv_gameplayfix_setmodelrealbox 0\n"
-"sv_gameplayfix_droptofloorstartsolid 0\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 0\n"
-"sv_gameplayfix_noairborncorpse 0\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 0\n"
-"sv_gameplayfix_easierwaterjump 0\n"
-"sv_gameplayfix_delayprojectiles 0\n"
-"sv_gameplayfix_multiplethinksperframe 0\n"
-"sv_gameplayfix_fixedcheckwatertransition 0\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 0\n"
-"sv_gameplayfix_swiminbmodels 0\n"
-"sv_gameplayfix_downtracesupportsongroundflag 0\n"
+// hipnotic mission pack has issues with bobbing water entities 'jittering' between different heights on alternate frames at the default 0.0138889 ticrate, 0.02 avoids this issue
 "sys_ticrate 0.02\n"
-"r_shadow_gloss 1\n"
-"r_shadow_bumpscale_basetexture 0\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
+// hipnotic mission pack has issues in their proximity mine sticking code, which causes them to bounce off.
+"sv_gameplayfix_slidemoveprojectiles 0\n"
 				);
 			break;
-		// rogue mission pack has a guardian boss that does not wake up if findradius returns one of the entities around its spawn area
 		case GAME_ROGUE:
 			Cbuf_InsertText(cmd, "\n"
+// rogue mission pack has a guardian boss that does not wake up if findradius returns one of the entities around its spawn area
 "sv_gameplayfix_blowupfallenzombies 0\n"
-"sv_gameplayfix_findradiusdistancetobox 0\n"
-"sv_gameplayfix_grenadebouncedownslopes 0\n"
-"sv_gameplayfix_slidemoveprojectiles 0\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 0\n"
-"sv_gameplayfix_setmodelrealbox 0\n"
-"sv_gameplayfix_droptofloorstartsolid 0\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 0\n"
-"sv_gameplayfix_noairborncorpse 0\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 0\n"
-"sv_gameplayfix_easierwaterjump 0\n"
-"sv_gameplayfix_delayprojectiles 0\n"
-"sv_gameplayfix_multiplethinksperframe 0\n"
-"sv_gameplayfix_fixedcheckwatertransition 0\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 0\n"
-"sv_gameplayfix_swiminbmodels 0\n"
-"sv_gameplayfix_downtracesupportsongroundflag 0\n"
-"sys_ticrate 0.01388889\n"
-"r_shadow_gloss 1\n"
-"r_shadow_bumpscale_basetexture 0\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
+// On r2m3 3 of the 4 monster_lava_man are placed in solid clips so droptofloor() moves them to a lower level if tracebox can
+// move them out of solid, if it can't they're stuck (original behaviour), only proper fix is to move them with a .ent file.
+"mod_q1bsp_traceoutofsolid 0\n"
 				);
 			break;
 		case GAME_TENEBRAE:
+			if (cls.state != ca_dedicated)
+				Cbuf_InsertText(cmd, "\n"
+"r_shadow_gloss 2\n"
+"r_shadow_bumpscale_basetexture 4\n"
+					);
+			break;
+		case GAME_NEXUIZ:
+			Cbuf_InsertText(cmd, "\n"
+"sv_gameplayfix_q2airaccelerate 1\n"
+"sv_gameplayfix_stepmultipletimes 1\n"
+				);
+			if (cls.state != ca_dedicated)
+				Cbuf_InsertText(cmd, "\n"
+"csqc_polygons_defaultmaterial_nocullface 1\n"
+"con_chatsound_team_mask 13\n"
+					);
+			break;
+		case GAME_XONOTIC:
+		case GAME_VORETOURNAMENT:
+			Cbuf_InsertText(cmd, "\n"
+// compatibility for versions prior to 2020-05-25, this can be overridden in newer versions to get the default behavior and be consistent with FTEQW engine
+"sv_qcstats 1\n"
+"mod_q1bsp_zero_hullsize_cutoff 8.03125\n"
+				);
+			if (cls.state != ca_dedicated)
+				Cbuf_InsertText(cmd, "\n"
+"csqc_polygons_defaultmaterial_nocullface 1\n"
+"con_chatsound_team_mask 13\n"
+					);
+			break;
+		case GAME_STEELSTORM:
+			if (cls.state != ca_dedicated)
+				Cbuf_InsertText(cmd, "\n"
+// Steel Storm: Burning Retribution csqc misinterprets CSQC_InputEvent if type is a value other than 0 or 1
+"cl_csqc_generatemousemoveevents 0\n"
+"csqc_polygons_defaultmaterial_nocullface 1\n"
+					);
+			break;
+		case GAME_QUAKE15:
+			Cbuf_InsertText(cmd, "\n"
+// Corpses slide around without this bug from old DP versions
+"sv_gameplayfix_impactbeforeonground 1\n"
+// Reduce likelihood of incorrectly placed corpses sinking into the ground
+"sv_gameplayfix_unstickentities 1\n"
+			);
+			break;
+		case GAME_AD:
+			if (cls.state != ca_dedicated)
+				Cbuf_InsertText(cmd, "\n"
+// Arcane Dimensions V1.80 Patch 1 assumes engines that don't pass values to CSQC_Init() are DP,
+// instead of doing a workaround there we can give it what it really wants (fixes offscreen HUD).
+"csqc_lowres 1\n"
+					);
+			break;
+		case GAME_CTSJ2:
+			Cbuf_InsertText(cmd, "\n"
+// Doesn't completely initialise during worldspawn and the init frames, sometimes causing the
+// essential item on start.bsp to not spawn when the local client connects and spawns "too fast".
+"sv_init_frame_count 3\n"
+			);
+		default:
+			break;
+		}
+
+		// special defaults for game groups go here, these execute before the specific games above
+		switch (com_startupgamegroup)
+		{
+		case GAME_NORMAL: // id1 Quake and its mods
 			Cbuf_InsertText(cmd, "\n"
 "sv_gameplayfix_blowupfallenzombies 0\n"
 "sv_gameplayfix_findradiusdistancetobox 0\n"
@@ -765,94 +666,12 @@ static void Cmd_Exec(cmd_state_t *cmd, const char *filename)
 "sv_gameplayfix_q1bsptracelinereportstexture 0\n"
 "sv_gameplayfix_swiminbmodels 0\n"
 "sv_gameplayfix_downtracesupportsongroundflag 0\n"
-"sys_ticrate 0.01388889\n"
-"r_shadow_gloss 2\n"
-"r_shadow_bumpscale_basetexture 4\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
-				);
-			break;
-		case GAME_NEXUIZ:
-			Cbuf_InsertText(cmd, "\n"
-"sv_gameplayfix_blowupfallenzombies 1\n"
-"sv_gameplayfix_findradiusdistancetobox 1\n"
-"sv_gameplayfix_grenadebouncedownslopes 1\n"
-"sv_gameplayfix_slidemoveprojectiles 1\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 1\n"
-"sv_gameplayfix_setmodelrealbox 1\n"
-"sv_gameplayfix_droptofloorstartsolid 1\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 1\n"
-"sv_gameplayfix_noairborncorpse 1\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 1\n"
-"sv_gameplayfix_easierwaterjump 1\n"
-"sv_gameplayfix_delayprojectiles 1\n"
-"sv_gameplayfix_multiplethinksperframe 1\n"
-"sv_gameplayfix_fixedcheckwatertransition 1\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 1\n"
-"sv_gameplayfix_swiminbmodels 1\n"
-"sv_gameplayfix_downtracesupportsongroundflag 1\n"
-"sys_ticrate 0.01388889\n"
-"sv_gameplayfix_q2airaccelerate 1\n"
-"sv_gameplayfix_stepmultipletimes 1\n"
-"csqc_polygons_defaultmaterial_nocullface 1\n"
-"con_chatsound_team_mask 13\n"
-				);
-			break;
-		case GAME_XONOTIC:
-		case GAME_VORETOURNAMENT:
-			// compatibility for versions prior to 2020-05-25, this can be overridden in newer versions to get the default behavior and be consistent with FTEQW engine
-			Cbuf_InsertText(cmd, "\n"
-"csqc_polygons_defaultmaterial_nocullface 1\n"
-"con_chatsound_team_mask 13\n"
-"sv_gameplayfix_customstats 1\n"
-				);
-			break;
-		// Steel Storm: Burning Retribution csqc misinterprets CSQC_InputEvent if type is a value other than 0 or 1
-		case GAME_STEELSTORM:
-			Cbuf_InsertText(cmd, "\n"
-"sv_gameplayfix_blowupfallenzombies 1\n"
-"sv_gameplayfix_findradiusdistancetobox 1\n"
-"sv_gameplayfix_grenadebouncedownslopes 1\n"
-"sv_gameplayfix_slidemoveprojectiles 1\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 1\n"
-"sv_gameplayfix_setmodelrealbox 1\n"
-"sv_gameplayfix_droptofloorstartsolid 1\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 1\n"
-"sv_gameplayfix_noairborncorpse 1\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 1\n"
-"sv_gameplayfix_easierwaterjump 1\n"
-"sv_gameplayfix_delayprojectiles 1\n"
-"sv_gameplayfix_multiplethinksperframe 1\n"
-"sv_gameplayfix_fixedcheckwatertransition 1\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 1\n"
-"sv_gameplayfix_swiminbmodels 1\n"
-"sv_gameplayfix_downtracesupportsongroundflag 1\n"
-"sys_ticrate 0.01388889\n"
-"cl_csqc_generatemousemoveevents 0\n"
-"csqc_polygons_defaultmaterial_nocullface 1\n"
+// Work around low brightness and poor legibility of Quake font
+"r_textbrightness 0.25\n"
+"r_textcontrast 1.25\n"
 				);
 			break;
 		default:
-			Cbuf_InsertText(cmd, "\n"
-"sv_gameplayfix_blowupfallenzombies 1\n"
-"sv_gameplayfix_findradiusdistancetobox 1\n"
-"sv_gameplayfix_grenadebouncedownslopes 1\n"
-"sv_gameplayfix_slidemoveprojectiles 1\n"
-"sv_gameplayfix_upwardvelocityclearsongroundflag 1\n"
-"sv_gameplayfix_setmodelrealbox 1\n"
-"sv_gameplayfix_droptofloorstartsolid 1\n"
-"sv_gameplayfix_droptofloorstartsolid_nudgetocorrect 1\n"
-"sv_gameplayfix_noairborncorpse 1\n"
-"sv_gameplayfix_noairborncorpse_allowsuspendeditems 1\n"
-"sv_gameplayfix_easierwaterjump 1\n"
-"sv_gameplayfix_delayprojectiles 1\n"
-"sv_gameplayfix_multiplethinksperframe 1\n"
-"sv_gameplayfix_fixedcheckwatertransition 1\n"
-"sv_gameplayfix_q1bsptracelinereportstexture 1\n"
-"sv_gameplayfix_swiminbmodels 1\n"
-"sv_gameplayfix_downtracesupportsongroundflag 1\n"
-"sys_ticrate 0.01388889\n"
-"csqc_polygons_defaultmaterial_nocullface 0\n"
-				);
 			break;
 		}
 	}
@@ -877,7 +696,7 @@ static void Cmd_Exec_f (cmd_state_t *cmd)
 	s = FS_Search(Cmd_Argv(cmd, 1), true, true, NULL);
 	if(!s || !s->numfilenames)
 	{
-		Con_Printf("couldn't exec %s\n",Cmd_Argv(cmd, 1));
+		Con_Printf(CON_WARN "couldn't exec %s\n",Cmd_Argv(cmd, 1));
 		return;
 	}
 
@@ -979,7 +798,7 @@ static void Cmd_Toggle_f(cmd_state_t *cmd)
 		}
 		else
 		{ // Invalid CVar
-			Con_Printf("ERROR : CVar '%s' not found\n", Cmd_Argv(cmd, 1) );
+			Con_Printf(CON_WARN "ERROR : CVar '%s' not found\n", Cmd_Argv(cmd, 1) );
 		}
 	}
 }
@@ -1010,7 +829,7 @@ static void Cmd_Alias_f (cmd_state_t *cmd)
 	s = Cmd_Argv(cmd, 1);
 	if (strlen(s) >= MAX_ALIAS_NAME)
 	{
-		Con_Print("Alias name is too long\n");
+		Con_Print(CON_WARN "Alias name is too long\n");
 		return;
 	}
 
@@ -1029,7 +848,7 @@ static void Cmd_Alias_f (cmd_state_t *cmd)
 		cmd_alias_t *prev, *current;
 
 		a = (cmd_alias_t *)Z_Malloc (sizeof(cmd_alias_t));
-		strlcpy (a->name, s, sizeof (a->name));
+		dp_strlcpy (a->name, s, sizeof (a->name));
 		// insert it at the right alphanumeric position
 		for( prev = NULL, current = cmd->userdefined->alias ; current && strcmp( current->name, a->name ) < 0 ; prev = current, current = current->next )
 			;
@@ -1048,10 +867,10 @@ static void Cmd_Alias_f (cmd_state_t *cmd)
 	for (i=2 ; i < c ; i++)
 	{
 		if (i != 2)
-			strlcat (line, " ", sizeof (line));
-		strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
+			dp_strlcat (line, " ", sizeof (line));
+		dp_strlcat (line, Cmd_Argv(cmd, i), sizeof (line));
 	}
-	strlcat (line, "\n", sizeof (line));
+	dp_strlcat (line, "\n", sizeof (line));
 
 	alloclen = strlen (line) + 1;
 	if(alloclen >= 2)
@@ -1348,12 +1167,14 @@ static const char *Cmd_GetCvarValue(cmd_state_t *cmd, const char *var, size_t va
 	return varstr;
 }
 
-/*
+/**
 Cmd_PreprocessString
 
 Preprocesses strings and replaces $*, $param#, $cvar accordingly. Also strips comments.
+Returns the number of bytes written to *outtext excluding the \0 terminator.
 */
-static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *outtext, unsigned maxoutlen, cmd_alias_t *alias ) {
+static size_t Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *outtext, unsigned maxoutlen, cmd_alias_t *alias)
+{
 	const char *in;
 	size_t eat, varlen;
 	unsigned outlen;
@@ -1361,7 +1182,7 @@ static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *ou
 
 	// don't crash if there's no room in the outtext buffer
 	if( maxoutlen == 0 ) {
-		return false;
+		return 0;
 	}
 	maxoutlen--; // because of \0
 
@@ -1434,7 +1255,7 @@ static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *ou
 				{
 					val = Cmd_GetCvarValue(cmd, in + 1, varlen, alias);
 					if(!val)
-						return false;
+						return 0;
 					eat = varlen + 2;
 				}
 				else
@@ -1447,7 +1268,7 @@ static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *ou
 				varlen = strspn(in, "#*0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-");
 				val = Cmd_GetCvarValue(cmd, in, varlen, alias);
 				if(!val)
-					return false;
+					return 0;
 				eat = varlen;
 			}
 			if(val)
@@ -1471,8 +1292,8 @@ static qbool Cmd_PreprocessString(cmd_state_t *cmd, const char *intext, char *ou
 		else 
 			outtext[outlen++] = *in++;
 	}
-	outtext[outlen] = 0;
-	return true;
+	outtext[outlen] = '\0';
+	return outlen;
 }
 
 /*
@@ -1497,6 +1318,26 @@ static void Cmd_ExecuteAlias (cmd_state_t *cmd, cmd_alias_t *alias)
 	// alias parameters containing dollar signs can have bad effects.
 	Cmd_QuoteString(buffer2, sizeof(buffer2), buffer, "$", false);
 	Cbuf_InsertText(cmd, buffer2);
+}
+
+void Cmd_PreprocessAndExecuteString(cmd_state_t *cmd, const char *text, size_t textlen, cmd_source_t src, qbool lockmutex)
+{
+	char preprocessed[MAX_INPUTLINE];
+	size_t preprocessed_len;
+	const char *firstchar;
+
+	firstchar = text;
+	while(*firstchar && ISWHITESPACE(*firstchar))
+		++firstchar;
+	if((strncmp(firstchar, "alias", 5)   || !ISWHITESPACE(firstchar[5]))
+	&& (strncmp(firstchar, "bind", 4)    || !ISWHITESPACE(firstchar[4]))
+	&& (strncmp(firstchar, "in_bind", 7) || !ISWHITESPACE(firstchar[7])))
+	{
+		if((preprocessed_len = Cmd_PreprocessString(cmd, text, preprocessed, sizeof(preprocessed), NULL)))
+			Cmd_ExecuteString(cmd, preprocessed, preprocessed_len, src, lockmutex);
+	}
+	else
+		Cmd_ExecuteString(cmd, text, textlen, src, lockmutex);
 }
 
 /*
@@ -1626,7 +1467,7 @@ static void Cmd_Apropos_f(cmd_state_t *cmd)
 	Con_Printf("%i result%s\n\n", count, (count > 1) ? "s" : "");
 }
 
-static cmd_state_t *Cmd_AddInterpreter(cmd_buf_t *cbuf, cvar_state_t *cvars, int cvars_flagsmask, int cmds_flagsmask, cmd_userdefined_t *userdefined)
+static cmd_state_t *Cmd_AddInterpreter(cmd_buf_t *cbuf, cvar_state_t *cvars, unsigned cvars_flagsmask, unsigned cmds_flagsmask, cmd_userdefined_t *userdefined)
 {
 	cmd_state_t *cmd = (cmd_state_t *)Mem_Alloc(tempmempool, sizeof(cmd_state_t));
 	
@@ -1637,7 +1478,7 @@ static cmd_state_t *Cmd_AddInterpreter(cmd_buf_t *cbuf, cvar_state_t *cvars, int
 
 	cmd->cvars = cvars;
 	cmd->cvars_flagsmask = cvars_flagsmask;
-	cmd->cmd_flags = cmds_flagsmask;
+	cmd->cmd_flagsmask = cmds_flagsmask;
 	cmd->userdefined = userdefined;
 
 	return cmd;
@@ -1651,9 +1492,11 @@ Cmd_Init
 void Cmd_Init(void)
 {
 	cmd_buf_t *cbuf;
+	unsigned cvars_flagsmask, cmds_flagsmask;
+
 	cbuf_mempool = Mem_AllocPool("Command buffer", 0, NULL);
 	cbuf = (cmd_buf_t *)Mem_Alloc(cbuf_mempool, sizeof(cmd_buf_t));
-	cbuf->maxsize = 655360;
+	cbuf->maxsize = CMDBUFSIZE;
 	cbuf->lock = Thread_CreateMutex();
 	cbuf->wait = false;
 	host.cbuf = cbuf;
@@ -1666,14 +1509,22 @@ void Cmd_Init(void)
 	cmd_iter_all = (cmd_iter_t *)Mem_Alloc(tempmempool, sizeof(cmd_iter_t) * 3);
 
 	// local console
-	cmd_iter_all[0].cmd = cmd_local = Cmd_AddInterpreter(cbuf, &cvars_all, CF_CLIENT | CF_SERVER, CF_CLIENT | CF_CLIENT_FROM_SERVER | CF_SERVER_FROM_CLIENT, &cmd_userdefined_all);
+	if (cls.state == ca_dedicated)
+	{
+		cvars_flagsmask = CF_SERVER;
+		cmds_flagsmask = CF_SERVER | CF_SERVER_FROM_CLIENT;
+	}
+	else
+	{
+		cvars_flagsmask = CF_CLIENT | CF_SERVER;
+		cmds_flagsmask = CF_CLIENT | CF_SERVER | CF_CLIENT_FROM_SERVER | CF_SERVER_FROM_CLIENT;
+	}
+	cmd_iter_all[0].cmd = cmd_local = Cmd_AddInterpreter(cbuf, &cvars_all, cvars_flagsmask, cmds_flagsmask, &cmd_userdefined_all);
 	cmd_local->Handle = Cmd_CL_Callback;
-	cmd_local->NotFound = NULL;
 
 	// server commands received from clients have no reason to access cvars, cvar expansion seems perilous.
 	cmd_iter_all[1].cmd = cmd_serverfromclient = Cmd_AddInterpreter(cbuf, &cvars_null, 0, CF_SERVER_FROM_CLIENT | CF_USERINFO, &cmd_userdefined_null);
 	cmd_serverfromclient->Handle = Cmd_SV_Callback;
-	cmd_serverfromclient->NotFound = Cmd_SV_NotFound;
 
 	cmd_iter_all[2].cmd = NULL;
 //
@@ -1681,7 +1532,6 @@ void Cmd_Init(void)
 //
 	// client-only commands
 	Cmd_AddCommand(CF_SHARED, "wait", Cmd_Wait_f, "make script execution wait for next rendered frame");
-	Cmd_AddCommand(CF_CLIENT, "cprint", Cmd_Centerprint_f, "print something at the screen center");
 
 	// maintenance commands used for upkeep of cvars and saved configs
 	Cmd_AddCommand(CF_SHARED, "stuffcmds", Cmd_StuffCmds_f, "execute commandline parameters (must be present in quake.rc script)");
@@ -1741,44 +1591,13 @@ void Cmd_Shutdown(void)
 
 /*
 ============
-Cmd_Argc
-============
-*/
-int		Cmd_Argc (cmd_state_t *cmd)
-{
-	return cmd->argc;
-}
-
-/*
-============
-Cmd_Argv
-============
-*/
-const char *Cmd_Argv(cmd_state_t *cmd, int arg)
-{
-	if (arg >= cmd->argc )
-		return cmd->null_string;
-	return cmd->argv[arg];
-}
-
-/*
-============
-Cmd_Args
-============
-*/
-const char *Cmd_Args (cmd_state_t *cmd)
-{
-	return cmd->args;
-}
-
-/*
-============
 Cmd_TokenizeString
 
 Parses the given string into command line tokens.
+Takes a null terminated string.  Does not need to be /n terminated.
 ============
 */
-// AK: This function should only be called from ExcuteString because the current design is a bit of an hack
+// AK: This function should only be called from ExecuteString because the current design is a bit of an hack
 static void Cmd_TokenizeString (cmd_state_t *cmd, const char *text)
 {
 	int l;
@@ -1822,7 +1641,7 @@ static void Cmd_TokenizeString (cmd_state_t *cmd, const char *text)
 			l = (int)strlen(com_token) + 1;
 			if (cmd->cbuf->tokenizebufferpos + l > CMD_TOKENIZELENGTH)
 			{
-				Con_Printf("Cmd_TokenizeString: ran out of %i character buffer space for command arguments\n", CMD_TOKENIZELENGTH);
+				Con_Printf(CON_WARN "Cmd_TokenizeString: ran out of %i character buffer space for command arguments\n", CMD_TOKENIZELENGTH);
 				break;
 			}
 			memcpy (cmd->cbuf->tokenizebuffer + cmd->cbuf->tokenizebufferpos, com_token, l);
@@ -1839,7 +1658,7 @@ static void Cmd_TokenizeString (cmd_state_t *cmd, const char *text)
 Cmd_AddCommand
 ============
 */
-void Cmd_AddCommand(int flags, const char *cmd_name, xcommand_t function, const char *description)
+void Cmd_AddCommand(unsigned flags, const char *cmd_name, xcommand_t function, const char *description)
 {
 	cmd_function_t *func;
 	cmd_function_t *prev, *current;
@@ -1849,12 +1668,12 @@ void Cmd_AddCommand(int flags, const char *cmd_name, xcommand_t function, const 
 	for (i = 0; i < 2; i++)
 	{
 		cmd = cmd_iter_all[i].cmd;
-		if (flags & cmd->cmd_flags)
+		if (flags & cmd->cmd_flagsmask)
 		{
 			// fail if the command is a variable name
 			if (Cvar_FindVar(cmd->cvars, cmd_name, ~0))
 			{
-				Con_Printf("Cmd_AddCommand: %s already defined as a var\n", cmd_name);
+				Con_Printf(CON_WARN "Cmd_AddCommand: %s already defined as a var\n", cmd_name);
 				return;
 			}
 
@@ -1865,7 +1684,7 @@ void Cmd_AddCommand(int flags, const char *cmd_name, xcommand_t function, const 
 				{
 					if (!strcmp(cmd_name, func->name))
 					{
-						Con_Printf("Cmd_AddCommand: %s already defined\n", cmd_name);
+						Con_Printf(CON_WARN "Cmd_AddCommand: %s already defined\n", cmd_name);
 						continue;
 					}
 				}
@@ -1900,7 +1719,6 @@ void Cmd_AddCommand(int flags, const char *cmd_name, xcommand_t function, const 
 					}
 				}
 
-
 				func = (cmd_function_t *)Mem_Alloc(cmd->mempool, sizeof(cmd_function_t));
 				func->flags = flags;
 				func->name = cmd_name;
@@ -1908,6 +1726,18 @@ void Cmd_AddCommand(int flags, const char *cmd_name, xcommand_t function, const 
 				func->description = description;
 				func->qcfunc = true; //[515]: csqc
 				func->next = cmd->userdefined->qc_functions;
+
+				// bones_was_here: if this QC command overrides an engine command, store its pointer
+				// to avoid doing this search at invocation if QC declines to handle this command.
+				for (cmd_function_t *f = cmd->engine_functions; f; f = f->next)
+				{
+					if (!strcmp(cmd_name, f->name))
+					{
+						Con_DPrintf("Adding QC override of engine command %s\n", cmd_name);
+						func->overridden = f;
+						break;
+					}
+				}
 
 				// insert it at the right alphanumeric position
 				for (prev = NULL, current = cmd->userdefined->qc_functions; current && strcmp(current->name, func->name) < 0; prev = current, current = current->next)
@@ -2175,23 +2005,26 @@ extern cvar_t sv_cheats;
  * implement that behavior that doesn't involve an #ifdef, or
  * making a mess of hooks.
  */
-qbool Cmd_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, cmd_source_t src)
+qbool Cmd_Callback(cmd_state_t *cmd, cmd_function_t *func)
 {
 	if (func->function)
 		func->function(cmd);
 	else
-		Con_Printf("Command \"%s\" can not be executed\n", Cmd_Argv(cmd, 0));
+		Con_Printf(CON_WARN "Command \"%s\" can not be executed\n", Cmd_Argv(cmd, 0));
 	return true;
 }
 
-qbool Cmd_CL_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, cmd_source_t src)
+qbool Cmd_CL_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, size_t textlen, cmd_source_t src)
 {
 	// TODO: Assign these functions to QC commands directly?
 	if(func->qcfunc)
 	{
-		if(((func->flags & CF_CLIENT) && CL_VM_ConsoleCommand(text)) ||
-		   ((func->flags & CF_SERVER) && SV_VM_ConsoleCommand(text)))
+		if(((func->flags & CF_CLIENT) && CL_VM_ConsoleCommand(text, textlen)) ||
+		   ((func->flags & CF_SERVER) && SV_VM_ConsoleCommand(text, textlen)))
 			return true;
+
+		if (func->overridden) // If this QC command overrides an engine command,
+			func = func->overridden; // fall back to that command.
 	}
 	if (func->flags & CF_SERVER_FROM_CLIENT)
 	{
@@ -2202,21 +2035,21 @@ qbool Cmd_CL_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, 
 		}
 		else if(!(func->flags & CF_SERVER))
 		{
-			Con_Printf("Cannot execute client commands from a dedicated server console.\n");
+			Con_Printf(CON_WARN "Cannot execute client commands from a dedicated server console.\n");
 			return true;
 		}
 	}
-	return Cmd_Callback(cmd, func, text, src);
+	return Cmd_Callback(cmd, func);
 }
 
-qbool Cmd_SV_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, cmd_source_t src)
+qbool Cmd_SV_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, size_t textlen, cmd_source_t src)
 {
 	if(func->qcfunc && (func->flags & CF_SERVER))
-		return SV_VM_ConsoleCommand(text);
+		return SV_VM_ConsoleCommand(text, textlen);
 	else if (src == src_client)
 	{
 		if((func->flags & CF_CHEAT) && !sv_cheats.integer)
-			SV_ClientPrintf("No cheats allowed. The server must have sv_cheats set to 1\n");
+			SV_ClientPrintf(CON_WARN "No cheats allowed. The server must have sv_cheats set to 1\n");
 		else
 			func->function(cmd);
 		return true;
@@ -2224,15 +2057,6 @@ qbool Cmd_SV_Callback(cmd_state_t *cmd, cmd_function_t *func, const char *text, 
 	return false;
 }
 
-qbool Cmd_SV_NotFound(cmd_state_t *cmd, cmd_function_t *func, const char *text, cmd_source_t src)
-{
-	if (cmd->source == src_client)
-	{
-		Con_Printf("Client \"%s\" tried to execute \"%s\"\n", host_client->name, text);
-		return true;
-	}
-	return false;
-}
 /*
 ============
 Cmd_ExecuteString
@@ -2241,11 +2065,12 @@ A complete command line has been parsed, so try to execute it
 FIXME: lookupnoadd the token to speed search?
 ============
 */
-void Cmd_ExecuteString (cmd_state_t *cmd, const char *text, cmd_source_t src, qbool lockmutex)
+void Cmd_ExecuteString(cmd_state_t *cmd, const char *text, size_t textlen, cmd_source_t src, qbool lockmutex)
 {
 	int oldpos;
 	cmd_function_t *func;
 	cmd_alias_t *a;
+
 	if (lockmutex)
 		Cbuf_Lock(cmd->cbuf);
 	oldpos = cmd->cbuf->tokenizebufferpos;
@@ -2259,31 +2084,27 @@ void Cmd_ExecuteString (cmd_state_t *cmd, const char *text, cmd_source_t src, qb
 
 // check functions
 	for (func = cmd->userdefined->qc_functions; func; func = func->next)
-	{
 		if (!strcasecmp(cmd->argv[0], func->name))
-		{
-			if(cmd->Handle(cmd, func, text, src))
-				goto done;
-		}
-	}
+			if(cmd->Handle(cmd, func, text, textlen, src))
+				goto functions_done;
 
 	for (func = cmd->engine_functions; func; func=func->next)
-	{
 		if (!strcasecmp (cmd->argv[0], func->name))
-		{
-			if(cmd->Handle(cmd, func, text, src))
-				goto done;
-		}
-	}
+			if(cmd->Handle(cmd, func, text, textlen, src))
+				goto functions_done;
 
-	// if it's a client command and no command was found, say so.
-	if(cmd->NotFound)
+functions_done:
+	// If it's a client command and wasn't found and handled, say so.
+	// Also don't let clients call server aliases.
+	if (cmd->source == src_client)
 	{
-		if(cmd->NotFound(cmd, func, text, src))
-			goto done;
+		if (!func)
+			Con_Printf("Client \"%s\" tried to execute \"%s\"\n", host_client->name, text);
+		goto done;
 	}
 
 // check alias
+	// Execute any alias with the same name as a command after the command.
 	for (a=cmd->userdefined->alias ; a ; a=a->next)
 	{
 		if (!strcasecmp (cmd->argv[0], a->name))
@@ -2293,9 +2114,14 @@ void Cmd_ExecuteString (cmd_state_t *cmd, const char *text, cmd_source_t src, qb
 		}
 	}
 
+	// If the command was found and handled don't try to handle it as a cvar.
+	if (func)
+		goto done;
+
 // check cvars
-	if (!Cvar_Command(cmd) && host.framecount > 0)
-		Con_Printf("Unknown command \"%s\"\n", Cmd_Argv(cmd, 0));
+	// Xonotic is still maintained so we don't want to hide problems from getting fixed
+	if (!Cvar_Command(cmd) && (host.framecount > 0 || gamemode == GAME_XONOTIC))
+		Con_Printf(CON_WARN "Unknown command \"%s\"\n", Cmd_Argv(cmd, 0));
 done:
 	cmd->cbuf->tokenizebufferpos = oldpos;
 	if (lockmutex)
@@ -2317,7 +2143,7 @@ int Cmd_CheckParm (cmd_state_t *cmd, const char *parm)
 
 	if (!parm)
 	{
-		Con_Printf ("Cmd_CheckParm: NULL");
+		Con_Printf(CON_WARN "Cmd_CheckParm: NULL");
 		return 0;
 	}
 

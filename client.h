@@ -57,7 +57,6 @@ typedef struct decalsystem_s
 	model_t *model;
 	double lastupdatetime;
 	int maxdecals;
-	int freedecal;
 	int numdecals;
 	tridecal_t *decals;
 	float *vertex3f;
@@ -894,7 +893,7 @@ typedef struct client_state_s
 	char sound_name[MAX_SOUNDS][MAX_QPATH];
 
 	// for display on solo scoreboard
-	char worldmessage[40]; // map title (not related to filename)
+	char worldmessage[MAX_QPATH]; // map title (not related to filename)
 	// variants of map name
 	char worldbasename[MAX_QPATH]; // %s
 	char worldname[MAX_QPATH]; // maps/%s.bsp
@@ -1048,6 +1047,8 @@ typedef struct client_state_s
 
 	// time accumulated since an input packet was sent
 	float timesincepacket;
+	// how many optimally timed inputs we sent since we received an update from the server
+	uint8_t opt_inputs_since_update;
 
 	// movement parameters for client prediction
 	unsigned int moveflags;
@@ -1107,7 +1108,6 @@ typedef struct client_state_s
 	// csqc stuff:
 	// server entity number corresponding to a clientside entity
 	unsigned short csqc_server2csqcentitynumber[MAX_EDICTS];
-	qbool csqc_loaded;
 	vec3_t csqc_vieworigin;
 	vec3_t csqc_viewangles;
 	vec3_t csqc_vieworiginfromengine;
@@ -1116,6 +1116,7 @@ typedef struct client_state_s
 	qbool csqc_usecsqclistener;
 	matrix4x4_t csqc_listenermatrix;
 	char csqc_printtextbuf[MAX_INPUTLINE];
+	size_t csqc_printtextbuf_len; ///< strlen
 
 	// collision culling data
 	world_t world;
@@ -1133,6 +1134,9 @@ typedef struct client_state_s
 
 	// used by EntityState5_ReadUpdate
 	skeleton_t *engineskeletonobjects;
+
+	// used by underwater sound filter (snd_waterfx)
+	qbool view_underwater;
 }
 client_state_t;
 
@@ -1165,7 +1169,6 @@ extern cvar_t cl_anglespeedkey;
 extern cvar_t cl_autofire;
 
 extern cvar_t cl_shownet;
-extern cvar_t cl_nolerp;
 extern cvar_t cl_nettimesyncfactor;
 extern cvar_t cl_nettimesyncboundmode;
 extern cvar_t cl_nettimesyncboundtolerance;
@@ -1185,6 +1188,7 @@ extern cvar_t m_side;
 extern cvar_t cl_autodemo;
 extern cvar_t cl_autodemo_nameformat;
 extern cvar_t cl_autodemo_delete;
+extern cvar_t cl_startdemos;
 
 extern cvar_t r_draweffects;
 
@@ -1200,6 +1204,8 @@ extern cvar_t cl_prydoncursor;
 extern cvar_t cl_prydoncursor_notrace;
 
 extern cvar_t cl_locs_enable;
+
+extern cvar_t cl_areagrid_link_SOLID_NOT;
 
 extern client_state_t cl;
 

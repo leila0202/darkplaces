@@ -32,8 +32,8 @@ when crossing a water boudnary.
 
 */
 
-cvar_t cl_rollspeed = {CF_CLIENT, "cl_rollspeed", "200", "how much strafing is necessary to tilt the view"};
-cvar_t cl_rollangle = {CF_CLIENT, "cl_rollangle", "2.0", "how much to tilt the view when strafing"};
+cvar_t cl_rollspeed = {CF_CLIENT | CF_ARCHIVE, "cl_rollspeed", "200", "how much strafing is necessary to tilt the view"};
+cvar_t cl_rollangle = {CF_CLIENT | CF_ARCHIVE, "cl_rollangle", "2.0", "how much to tilt the view when strafing"};
 
 cvar_t cl_bob = {CF_CLIENT | CF_ARCHIVE, "cl_bob","0.02", "view bobbing amount"};
 cvar_t cl_bobcycle = {CF_CLIENT | CF_ARCHIVE, "cl_bobcycle","0.6", "view bobbing speed"};
@@ -1059,6 +1059,7 @@ void V_CalcViewBlend(void)
 		supercontents = CL_PointSuperContents(vieworigin);
 		if (supercontents & SUPERCONTENTS_LIQUIDSMASK)
 		{
+			cl.view_underwater = true;
 			r_refdef.frustumscale_x *= 1 - (((sin(cl.time * 4.7) + 1) * 0.015) * r_waterwarp.value);
 			r_refdef.frustumscale_y *= 1 - (((sin(cl.time * 3.0) + 1) * 0.015) * r_waterwarp.value);
 			if (supercontents & SUPERCONTENTS_LAVA)
@@ -1083,6 +1084,7 @@ void V_CalcViewBlend(void)
 		}
 		else
 		{
+			cl.view_underwater = false;
 			cl.cshifts[CSHIFT_CONTENTS].destcolor[0] = 0;
 			cl.cshifts[CSHIFT_CONTENTS].destcolor[1] = 0;
 			cl.cshifts[CSHIFT_CONTENTS].destcolor[2] = 0;

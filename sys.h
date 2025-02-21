@@ -42,6 +42,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #endif
 # define DP_MOBILETOUCH	1
 # define DP_FREETYPE_STATIC 1
+#elif defined(__EMSCRIPTEN__) //this also defines linux, so it must come first
+# define DP_OS_NAME		"Browser"
+# define DP_OS_STR		"browser"
+# define DP_ARCH_STR	"WASM-32"
 #elif defined(__linux__)
 # define DP_OS_NAME		"Linux"
 # define DP_OS_STR		"linux"
@@ -150,7 +154,6 @@ typedef struct sys_s
 
 extern sys_t sys;
 
-extern struct cvar_s sys_usenoclockbutbenchmark;
 
 //
 // DLL management
@@ -199,22 +202,25 @@ void Sys_Init_Commands (void);
 
 
 /// \returns current timestamp
-char *Sys_TimeString(const char *timeformat);
+size_t Sys_TimeString(char buf[], size_t bufsize, const char *timeformat);
 
 //
 // system IO interface (these are the sys functions that need to be implemented in a new driver atm)
 //
 
-/// an error will cause the entire program to exit
+/// Causes the entire program to exit ASAP.
+/// Trailing \n should be omitted.
 void Sys_Error (const char *error, ...) DP_FUNC_PRINTF(1) DP_FUNC_NORETURN;
 
 /// (may) output text to terminal which launched program
-void Sys_Print(const char *text);
+/// is POSIX async-signal-safe
+/// textlen excludes any (optional) \0 terminator
+void Sys_Print(const char *text, size_t textlen);
+/// used to report failures inside Con_Printf()
 void Sys_Printf(const char *fmt, ...);
 
 /// INFO: This is only called by Host_Shutdown so we dont need testing for recursion
-void Sys_Shutdown (void);
-void Sys_Quit (int returnvalue);
+void Sys_SDL_Shutdown(void);
 
 /*! on some build/platform combinations (such as Linux gcc with the -pg
  * profiling option) this can turn on/off profiling, used primarily to limit
@@ -237,15 +243,23 @@ double Sys_DirtyTime(void);
 
 void Sys_ProvideSelfFD (void);
 
+/// Reads a line from POSIX stdin or the Windows console
 char *Sys_ConsoleInput (void);
 
 /// called to yield for a little bit so as not to hog cpu when paused or debugging
-void Sys_Sleep(int microseconds);
+double Sys_Sleep(double time);
 
+void Sys_SDL_Dialog(const char *title, const char *string);
+void Sys_SDL_Init(void);
 /// Perform Key_Event () callbacks until the input que is empty
-void Sys_SendKeyEvents (void);
+void Sys_SDL_HandleEvents(void);
 
-char *Sys_GetClipboardData (void);
+char *Sys_SDL_GetClipboardData (void);
+
+#ifdef __EMSCRIPTEN__ //WASM-specific functions
+bool js_syncFS (bool x);
+void Sys_EM_Register_Commands(void);
+#endif
 
 extern qbool sys_supportsdlgetticks;
 unsigned int Sys_SDL_GetTicks (void); // wrapper to call SDL_GetTicks
@@ -255,6 +269,8 @@ void Sys_SDL_Delay (unsigned int milliseconds); // wrapper to call SDL_Delay
 void Sys_InitProcessNice (void);
 void Sys_MakeProcessNice (void);
 void Sys_MakeProcessMean (void);
+
+int Sys_Main(int argc, char *argv[]);
 
 #endif
 

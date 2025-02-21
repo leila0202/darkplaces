@@ -78,4 +78,34 @@ extern Uchar u8_quake2utf8map[256];
 Uchar u8_toupper(Uchar ch);
 Uchar u8_tolower(Uchar ch);
 
+#ifdef WIN32
+
+// WTF-8 encoding to circumvent Windows encodings, be it UTF-16 or random codepages
+// https://simonsapin.github.io/wtf-8/
+
+typedef wchar_t wchar;
+
+// whether to regard wchar as utf-32
+// sizeof(wchar_t) is 2 for win32, we don't have sizeof in macros
+#define WTF8U32 0
+// check for extra sanity in conversion steps
+#define WTF8CHECKS 1
+
+int towtf8(const wchar* wstr, int wlen, char* str, int maxlen);
+int fromwtf8(const char* str, int len, wchar* wstr, int maxwlen);
+int wstrlen(const wchar* wstr);
+
+// helpers for wchar code
+/* convert given wtf-8 encoded char *str to wchar *wstr, only on win32 */
+#define WIDE(str, wstr) fromwtf8(str, strlen(str), wstr, strlen(str))
+/* convert given wchar *wstr to wtf-8 encoded char *str, only on win32 */
+#define NARROW(wstr, str) towtf8(wstr, wstrlen(wstr), str, wstrlen(wstr) * (WTF8U32 ? 4 : 3))
+
+#else
+
+#define WIDE(str, wstr) ;
+#define NARROW(wstr, str) ;
+
+#endif // WIN32
+
 #endif // UTF8LIB_H__

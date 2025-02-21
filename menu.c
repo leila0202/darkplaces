@@ -34,7 +34,6 @@ static cvar_t menu_progs = {CF_CLIENT, "menu_progs", "menu.dat", "name of quakec
 static int NehGameType;
 
 enum m_state_e m_state;
-char m_return_reason[128];
 
 void M_Menu_Main_f(cmd_state_t *cmd);
 	void M_Menu_SinglePlayer_f(cmd_state_t *cmd);
@@ -107,13 +106,6 @@ static void M_ServerList_Key(cmd_state_t *cmd, int key, int ascii);
 static void M_ModList_Key(cmd_state_t *cmd, int key, int ascii);
 
 static qbool	m_entersound;		///< play after drawing a frame, so caching won't disrupt the sound
-
-void M_Update_Return_Reason(const char *s)
-{
-	strlcpy(m_return_reason, s, sizeof(m_return_reason));
-	if (s)
-		Con_DPrintf("%s\n", s);
-}
 
 #define StartingGame	(m_multiplayer_cursor == 1)
 #define JoiningGame		(m_multiplayer_cursor == 0)
@@ -429,6 +421,7 @@ void M_Menu_Main_f(cmd_state_t *cmd)
 }
 
 
+static bool mp_failed;
 static void M_Main_Draw (void)
 {
 	int		f;
@@ -441,11 +434,20 @@ static void M_Main_Draw (void)
 		const char *s;
 		M_Background(640, 480); //fall back is always to 640x480, this makes it most readable at that.
 		y = 480/3-16;
-		s = "You have reached this menu due to missing or unlocatable content/data";M_PrintRed ((640-strlen(s)*8)*0.5, (480/3)-16, s);y+=8;
-		y+=8;
-		s = "You may consider adding";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
-		s = "-basedir /path/to/game";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
-		s = "to your launch commandline";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
+		if (mp_failed)
+		{
+			s = "The menu QC program has failed.";M_PrintRed ((640-strlen(s)*8)*0.5, y, s);y+=8;
+			y+=8;
+			s = "You should find the specific error(s) in the console.";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
+		}
+		else
+		{
+			s = "The required files were not found.";M_PrintRed ((640-strlen(s)*8)*0.5, y, s);y+=8;
+			y+=8;
+			s = "You may consider adding";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
+			s = "-basedir /path/to/game";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
+			s = "to your launch commandline.";M_Print ((640-strlen(s)*8)*0.5, y, s);y+=8;
+		}
 		M_Print (640/2 - 48, 480/2, "Open Console"); //The console usually better shows errors (failures)
 		M_Print (640/2 - 48, 480/2 + 8, "Quit");
 		M_DrawCharacter(640/2 - 56, 480/2 + (8 * m_main_cursor), 12+((int)(host.realtime*4)&1));
@@ -505,6 +507,8 @@ static void M_Main_Key(cmd_state_t *cmd, int key, int ascii)
 		key_dest = key_game;
 		m_state = m_none;
 		//cls.demonum = m_save_demonum;
+		//if(!cl_startdemos.integer)
+		//	break;
 		//if (cls.demonum != -1 && !cls.demoplayback && cls.state != ca_connected)
 		//	CL_NextDemo ();
 		break;
@@ -858,7 +862,7 @@ static void M_ScanSaves (void)
 
 	for (i=0 ; i<MAX_SAVEGAMES ; i++)
 	{
-		strlcpy (m_filenames[i], "--- UNUSED SLOT ---", sizeof(m_filenames[i]));
+		dp_strlcpy (m_filenames[i], "--- UNUSED SLOT ---", sizeof(m_filenames[i]));
 		loadable[i] = false;
 		dpsnprintf (name, sizeof(name), "s%i.sav", (int)i);
 		f = FS_OpenRealFile (name, "rb", false);
@@ -874,7 +878,7 @@ static void M_ScanSaves (void)
 		//version = atoi(com_token);
 		// description
 		COM_ParseToken_Simple(&t, false, false, true);
-		strlcpy (m_filenames[i], com_token, sizeof (m_filenames[i]));
+		dp_strlcpy (m_filenames[i], com_token, sizeof (m_filenames[i]));
 
 	// change _ back to space
 		for (j=0 ; j<SAVEGAME_COMMENT_LENGTH ; j++)
@@ -1292,7 +1296,7 @@ void M_Menu_Setup_f(cmd_state_t *cmd)
 	key_dest = key_menu;
 	m_state = m_setup;
 	m_entersound = true;
-	strlcpy(setup_myname, cl_name.string, sizeof(setup_myname));
+	dp_strlcpy(setup_myname, cl_name.string, sizeof(setup_myname));
 	setup_top = setup_oldtop = cl_topcolor.integer;
 	setup_bottom = setup_oldbottom = cl_bottomcolor.integer;
 	setup_rate = cl_rate.integer;
@@ -2250,8 +2254,8 @@ static void M_Options_ColorControl_Draw (void)
 
 	m_opty += 4;
 	DrawQ_Fill(menu_x, menu_y + m_opty, 320, 4 + 64 + 8 + 64 + 4, 0, 0, 0, 1, 0);m_opty += 4;
-	s = (float) 312 / 2 * vid.width / vid_conwidth.integer;
-	t = (float) 4 / 2 * vid.height / vid_conheight.integer;
+	s = (float) 312 / 2 * vid.mode.width / vid_conwidth.integer;
+	t = (float) 4 / 2 * vid.mode.height / vid_conheight.integer;
 	DrawQ_SuperPic(menu_x + 4, menu_y + m_opty, dither, 312, 4, 0,0, 1,0,0,1, s,0, 1,0,0,1, 0,t, 1,0,0,1, s,t, 1,0,0,1, 0);m_opty += 4;
 	DrawQ_SuperPic(menu_x + 4, menu_y + m_opty, NULL  , 312, 4, 0,0, 0,0,0,1, 1,0, 1,0,0,1, 0,1, 0,0,0,1, 1,1, 1,0,0,1, 0);m_opty += 4;
 	DrawQ_SuperPic(menu_x + 4, menu_y + m_opty, dither, 312, 4, 0,0, 0,1,0,1, s,0, 0,1,0,1, 0,t, 0,1,0,1, s,t, 0,1,0,1, 0);m_opty += 4;
@@ -2265,8 +2269,8 @@ static void M_Options_ColorControl_Draw (void)
 	c[1] = c[0];
 	c[2] = c[1];
 	VID_ApplyGammaToColor(c, c);
-	s = (float) 48 / 2 * vid.width / vid_conwidth.integer;
-	t = (float) 48 / 2 * vid.height / vid_conheight.integer;
+	s = (float) 48 / 2 * vid.mode.width / vid_conwidth.integer;
+	t = (float) 48 / 2 * vid.mode.height / vid_conheight.integer;
 	u = s * 0.5;
 	v = t * 0.5;
 	m_opty += 8;
@@ -2640,18 +2644,18 @@ static void M_Keys_Draw (void)
 
 		// LadyHavoc: redesigned to print more than 2 keys, inspired by Tomaz's MiniRacer
 		if (keys[0] == -1)
-			strlcpy(keystring, "???", sizeof(keystring));
+			dp_strlcpy(keystring, "???", sizeof(keystring));
 		else
 		{
-			char tinystr[2];
+			char tinystr[TINYSTR_LEN];
 			keystring[0] = 0;
 			for (j = 0;j < NUMKEYS;j++)
 			{
 				if (keys[j] != -1)
 				{
 					if (j > 0)
-						strlcat(keystring, " or ", sizeof(keystring));
-					strlcat(keystring, Key_KeynumToString (keys[j], tinystr, sizeof(tinystr)), sizeof(keystring));
+						dp_strlcat(keystring, " or ", sizeof(keystring));
+					dp_strlcat(keystring, Key_KeynumToString (keys[j], tinystr, TINYSTR_LEN), sizeof(keystring));
 				}
 			}
 		}
@@ -2669,7 +2673,7 @@ static void M_Keys_Key(cmd_state_t *cmd, int k, int ascii)
 {
 	char	line[80];
 	int		keys[NUMKEYS];
-	char	tinystr[2];
+	char	tinystr[TINYSTR_LEN];
 
 	if (bind_grab)
 	{	// defining a key
@@ -2680,7 +2684,7 @@ static void M_Keys_Key(cmd_state_t *cmd, int k, int ascii)
 		}
 		else //if (k != '`')
 		{
-			dpsnprintf(line, sizeof(line), "bind \"%s\" \"%s\"\n", Key_KeynumToString(k, tinystr, sizeof(tinystr)), bindnames[keys_cursor][0]);
+			dpsnprintf(line, sizeof(line), "bind \"%s\" \"%s\"\n", Key_KeynumToString(k, tinystr, TINYSTR_LEN), bindnames[keys_cursor][0]);
 			Cbuf_InsertText (cmd, line);
 		}
 
@@ -2824,6 +2828,7 @@ video_resolution_t video_resolutions_hardcoded[] =
 {"WideScreen 16x9"           , 1280, 720, 640, 360, 1     },
 {"WideScreen 16x9"           , 1360, 768, 680, 384, 1     },
 {"WideScreen 16x9"           , 1366, 768, 683, 384, 1     },
+{"WideScreen 16x9"           , 1600, 900, 640, 360, 1     },
 {"WideScreen 16x9"           , 1920,1080, 640, 360, 1     },
 {"WideScreen 16x9"           , 2560,1440, 640, 360, 1     },
 {"WideScreen 16x9"           , 3840,2160, 640, 360, 1     },
@@ -2838,9 +2843,9 @@ video_resolution_t video_resolutions_hardcoded[] =
 // this is the number of the default mode (640x480) in the list above
 int video_resolutions_hardcoded_count = sizeof(video_resolutions_hardcoded) / sizeof(*video_resolutions_hardcoded) - 1;
 
-#define VIDEO_ITEMS 10
+#define VIDEO_ITEMS 11
 static int video_cursor = 0;
-static int video_cursor_table[VIDEO_ITEMS] = {68, 88, 96, 104, 112, 120, 128, 136, 144, 152};
+static int video_cursor_table[VIDEO_ITEMS] = {68, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160};
 static int menu_video_resolution;
 
 video_resolution_t *video_resolutions;
@@ -2904,7 +2909,7 @@ void M_Menu_Video_f(cmd_state_t *cmd)
 	m_state = m_video;
 	m_entersound = true;
 
-	M_Menu_Video_FindResolution(vid.width, vid.height, vid_pixelheight.value);
+	M_Menu_Video_FindResolution(vid.mode.width, vid.mode.height, vid_pixelheight.value);
 }
 
 
@@ -2931,10 +2936,10 @@ static void M_Video_Draw (void)
 
 	// Current and Proposed Resolution
 	M_Print(16, video_cursor_table[t] - 12, "    Current Resolution");
-	if (vid_supportrefreshrate && vid.userefreshrate && vid.fullscreen)
-		M_Print(220, video_cursor_table[t] - 12, va(vabuf, sizeof(vabuf), "%dx%d %.2fhz", vid.width, vid.height, vid.refreshrate));
+	if (vid.mode.refreshrate && vid.mode.fullscreen && !vid.mode.desktopfullscreen)
+		M_Print(220, video_cursor_table[t] - 12, va(vabuf, sizeof(vabuf), "%dx%d %.2fhz", vid.mode.width, vid.mode.height, vid.mode.refreshrate));
 	else
-		M_Print(220, video_cursor_table[t] - 12, va(vabuf, sizeof(vabuf), "%dx%d", vid.width, vid.height));
+		M_Print(220, video_cursor_table[t] - 12, va(vabuf, sizeof(vabuf), "%dx%d", vid.mode.width, vid.mode.height));
 	M_Print(16, video_cursor_table[t], "        New Resolution");
 	M_Print(220, video_cursor_table[t], va(vabuf, sizeof(vabuf), "%dx%d", menu_video_resolutions[menu_video_resolution].width, menu_video_resolutions[menu_video_resolution].height));
 	M_Print(96, video_cursor_table[t] + 8, va(vabuf, sizeof(vabuf), "Type: %s", menu_video_resolutions[menu_video_resolution].type));
@@ -2946,13 +2951,8 @@ static void M_Video_Draw (void)
 	t++;
 
 	// Refresh Rate
-	M_ItemPrint(16, video_cursor_table[t], "      Use Refresh Rate", vid_supportrefreshrate);
-	M_DrawCheckbox(220, video_cursor_table[t], vid_userefreshrate.integer);
-	t++;
-
-	// Refresh Rate
-	M_ItemPrint(16, video_cursor_table[t], "          Refresh Rate", vid_supportrefreshrate && vid_userefreshrate.integer);
-	M_DrawSlider(220, video_cursor_table[t], vid_refreshrate.value, 50, 150);
+	M_ItemPrint(16, video_cursor_table[t], "          Refresh Rate", vid_fullscreen.integer && !vid_desktopfullscreen.integer);
+	M_DrawSlider(220, video_cursor_table[t], vid_refreshrate.value, 50, 480);
 	t++;
 
 	// Fullscreen
@@ -2960,9 +2960,19 @@ static void M_Video_Draw (void)
 	M_DrawCheckbox(220, video_cursor_table[t], vid_fullscreen.integer);
 	t++;
 
+	// Desktop Fullscreen
+	M_ItemPrint(16, video_cursor_table[t], "    Desktop Fullscreen", vid_fullscreen.integer);
+	M_DrawCheckbox(220, video_cursor_table[t], vid_desktopfullscreen.integer);
+	t++;
+
+	// Display selection (multi-monitor)
+	M_ItemPrint(16, video_cursor_table[t], "       Display/Monitor", vid_info_displaycount.integer > 1);
+	M_DrawSlider(220, video_cursor_table[t], vid_display.integer, 0, vid_info_displaycount.integer - 1);
+	t++;
+
 	// Vertical Sync
 	M_ItemPrint(16, video_cursor_table[t], "         Vertical Sync", true);
-	M_DrawCheckbox(220, video_cursor_table[t], vid_vsync.integer);
+	M_DrawSlider(220, video_cursor_table[t], vid_vsync.integer, -1, 1);
 	t++;
 
 	M_ItemPrint(16, video_cursor_table[t], "    Anisotropic Filter", vid.support.ext_texture_filter_anisotropic);
@@ -3010,14 +3020,16 @@ static void M_Menu_Video_AdjustSliders (int dir)
 	}
 	else if (video_cursor == t++)
 		Cvar_SetValueQuick (&vid_samples, bound(1, vid_samples.value * (dir > 0 ? 2 : 0.5), 32));
-	else if (video_cursor == t++)
-		Cvar_SetValueQuick (&vid_userefreshrate, !vid_userefreshrate.integer);
-	else if (video_cursor == t++)
-		Cvar_SetValueQuick (&vid_refreshrate, bound(50, vid_refreshrate.value + dir, 150));
+	else if (video_cursor == t++) // allow jumping from the minimum refreshrate to 0 (auto)
+		Cvar_SetValueQuick (&vid_refreshrate, vid_refreshrate.value <= 50 && dir == -1 ? 0 : bound(50, vid_refreshrate.value + dir, 480));
 	else if (video_cursor == t++)
 		Cvar_SetValueQuick (&vid_fullscreen, !vid_fullscreen.integer);
 	else if (video_cursor == t++)
-		Cvar_SetValueQuick (&vid_vsync, !vid_vsync.integer);
+		Cvar_SetValueQuick (&vid_desktopfullscreen, !vid_desktopfullscreen.integer);
+	else if (video_cursor == t++)
+		Cvar_SetValueQuick (&vid_display, bound(0, vid_display.integer + dir, vid_info_displaycount.integer - 1));
+	else if (video_cursor == t++)
+		Cvar_SetValueQuick (&vid_vsync, bound(-1, vid_vsync.integer + dir, 1));
 	else if (video_cursor == t++)
 		Cvar_SetValueQuick (&gl_texture_anisotropy, bound(1, gl_texture_anisotropy.value * (dir < 0 ? 0.5 : 2.0), vid.max_anisotropy));
 	else if (video_cursor == t++)
@@ -3033,12 +3045,12 @@ static void M_Video_Key(cmd_state_t *cmd, int key, int ascii)
 	{
 		case K_ESCAPE:
 			// vid_shared.c has a copy of the current video config. We restore it
-			Cvar_SetValueQuick(&vid_fullscreen, vid.fullscreen);
-			Cvar_SetValueQuick(&vid_bitsperpixel, vid.bitsperpixel);
-			Cvar_SetValueQuick(&vid_samples, vid.samples);
-			if (vid_supportrefreshrate)
-				Cvar_SetValueQuick(&vid_refreshrate, vid.refreshrate);
-			Cvar_SetValueQuick(&vid_userefreshrate, vid.userefreshrate);
+			Cvar_SetValueQuick(&vid_display, vid.mode.display);
+			Cvar_SetValueQuick(&vid_fullscreen, vid.mode.fullscreen);
+			Cvar_SetValueQuick(&vid_desktopfullscreen, vid.mode.desktopfullscreen);
+			Cvar_SetValueQuick(&vid_bitsperpixel, vid.mode.bitsperpixel);
+			Cvar_SetValueQuick(&vid_samples, vid.mode.samples);
+			Cvar_SetValueQuick(&vid_refreshrate, vid.mode.refreshrate);
 
 			S_LocalSound ("sound/misc/menu1.wav");
 			M_Menu_Options_f(cmd);
@@ -3344,7 +3356,7 @@ void M_Menu_LanConfig_f(cmd_state_t *cmd)
 	lanConfig_port = 26000;
 	dpsnprintf(lanConfig_portname, sizeof(lanConfig_portname), "%u", (unsigned int) lanConfig_port);
 
-	M_Update_Return_Reason("");
+	cl_connect_status[0] = '\0';
 }
 
 
@@ -3397,8 +3409,8 @@ static void M_LanConfig_Draw (void)
 	if (lanConfig_cursor == 3)
 		M_DrawCharacter (basex+16 + 8*strlen(lanConfig_joinname), lanConfig_cursor_table [lanConfig_cursor], 10+((int)(host.realtime*4)&1));
 
-	if (*m_return_reason)
-		M_Print(basex, 168, m_return_reason);
+	if (*cl_connect_status)
+		M_Print(basex, 168, cl_connect_status);
 }
 
 
@@ -3441,7 +3453,7 @@ static void M_LanConfig_Key(cmd_state_t *cmd, int key, int ascii)
 
 		Cbuf_AddText(cmd, "stopdemo\n");
 
-		Cvar_SetValue(&cvars_all, "port", lanConfig_port);
+		Cvar_SetValueQuick(&sv_netport, lanConfig_port);
 
 		if (lanConfig_cursor == 1 || lanConfig_cursor == 2)
 		{
@@ -3998,7 +4010,7 @@ void M_GameOptions_Draw (void)
 		if (gamemode == GAME_TRANSFUSION)
 		{
 			if (!coop.integer && !deathmatch.integer)
-				Cvar_SetValue(&cvars_all, "deathmatch", 1);
+				Cvar_SetQuick(&deathmatch, "1");
 			if (deathmatch.integer == 0)
 				M_Print(160, 64, "Cooperative");
 			else if (deathmatch.integer == 2)
@@ -4009,7 +4021,7 @@ void M_GameOptions_Draw (void)
 		else if (gamemode == GAME_BATTLEMECH)
 		{
 			if (!deathmatch.integer)
-				Cvar_SetValue(&cvars_all, "deathmatch", 1);
+				Cvar_SetQuick(&deathmatch, "1");
 			if (deathmatch.integer == 2)
 				M_Print(160, 64, "Rambo Match");
 			else
@@ -4018,7 +4030,7 @@ void M_GameOptions_Draw (void)
 		else
 		{
 			if (!coop.integer && !deathmatch.integer)
-				Cvar_SetValue(&cvars_all, "deathmatch", 1);
+				Cvar_SetQuick(&deathmatch, "1");
 			if (coop.integer)
 				M_Print(160, 64, "Cooperative");
 			else
@@ -4360,7 +4372,7 @@ static void M_GameOptions_Key(cmd_state_t *cmd, int key, int ascii)
 				l = min(l - 1, 37);
 				memcpy(hostnamebuf, hostname.string, l);
 				hostnamebuf[l] = 0;
-				Cvar_Set(&cvars_all, "hostname", hostnamebuf);
+				Cvar_SetQuick(&hostname, hostnamebuf);
 			}
 		}
 		break;
@@ -4376,7 +4388,7 @@ static void M_GameOptions_Key(cmd_state_t *cmd, int key, int ascii)
 				memcpy(hostnamebuf, hostname.string, l);
 				hostnamebuf[l] = ascii;
 				hostnamebuf[l+1] = 0;
-				Cvar_Set(&cvars_all, "hostname", hostnamebuf);
+				Cvar_SetQuick(&hostname, hostnamebuf);
 			}
 		}
 	}
@@ -4385,7 +4397,8 @@ static void M_GameOptions_Key(cmd_state_t *cmd, int key, int ascii)
 //=============================================================================
 /* SLIST MENU */
 
-static int slist_cursor;
+static unsigned slist_cursor;
+static unsigned slist_visible;
 
 void M_Menu_ServerList_f(cmd_state_t *cmd)
 {
@@ -4393,7 +4406,7 @@ void M_Menu_ServerList_f(cmd_state_t *cmd)
 	m_state = m_slist;
 	m_entersound = true;
 	slist_cursor = 0;
-	M_Update_Return_Reason("");
+	cl_connect_status[0] = '\0';
 	if (lanConfig_cursor == 2)
 		Net_SlistQW_f(cmd);
 	else
@@ -4403,7 +4416,7 @@ void M_Menu_ServerList_f(cmd_state_t *cmd)
 
 static void M_ServerList_Draw (void)
 {
-	int n, y, visible, start, end, statnumplayers, statmaxplayers;
+	unsigned n, y, start, end, statnumplayers, statmaxplayers;
 	cachepic_t *p;
 	const char *s;
 	char vabuf[1024];
@@ -4415,14 +4428,14 @@ static void M_ServerList_Draw (void)
 		M_Background(640, vid_conheight.integer);
 	// scroll the list as the cursor moves
 	ServerList_GetPlayerStatistics(&statnumplayers, &statmaxplayers);
-	s = va(vabuf, sizeof(vabuf), "%i/%i masters %i/%i servers %i/%i players", masterreplycount, masterquerycount, serverreplycount, serverquerycount, statnumplayers, statmaxplayers);
+	s = va(vabuf, sizeof(vabuf), "%u/%u masters %u/%u servers %u/%u players", masterreplycount, masterquerycount, serverreplycount, serverquerycount, statnumplayers, statmaxplayers);
 	M_PrintRed((640 - strlen(s) * 8) / 2, 32, s);
-	if (*m_return_reason)
-		M_Print(16, menu_height - 8, m_return_reason);
+	if (*cl_connect_status)
+		M_Print(16, menu_height - 8, cl_connect_status);
 	y = 48;
-	visible = (int)((menu_height - 16 - y) / 8 / 2);
-	start = bound(0, slist_cursor - (visible >> 1), serverlist_viewcount - visible);
-	end = min(start + visible, serverlist_viewcount);
+	slist_visible = (menu_height - 16 - y) / 8 / 2;
+	start = min(slist_cursor - min(slist_cursor, slist_visible >> 1), serverlist_viewcount - min(serverlist_viewcount, slist_visible));
+	end = min(start + slist_visible, serverlist_viewcount);
 
 	p = Draw_CachePic ("gfx/p_multi");
 	M_DrawPic((640 - Draw_GetPicWidth(p)) / 2, 4, "gfx/p_multi");
@@ -4469,20 +4482,34 @@ static void M_ServerList_Key(cmd_state_t *cmd, int k, int ascii)
 			Net_Slist_f(cmd);
 		break;
 
+	case K_PGUP:
+		slist_cursor -= slist_visible - 2;
 	case K_UPARROW:
 	case K_LEFTARROW:
 		S_LocalSound ("sound/misc/menu1.wav");
 		slist_cursor--;
-		if (slist_cursor < 0)
+		if (slist_cursor >= serverlist_viewcount)
 			slist_cursor = serverlist_viewcount - 1;
 		break;
 
+	case K_PGDN:
+		slist_cursor += slist_visible - 2;
 	case K_DOWNARROW:
 	case K_RIGHTARROW:
 		S_LocalSound ("sound/misc/menu1.wav");
 		slist_cursor++;
 		if (slist_cursor >= serverlist_viewcount)
 			slist_cursor = 0;
+		break;
+
+	case K_HOME:
+		S_LocalSound ("sound/misc/menu1.wav");
+		slist_cursor = 0;
+		break;
+
+	case K_END:
+		S_LocalSound ("sound/misc/menu1.wav");
+		slist_cursor = serverlist_viewcount - 1;
 		break;
 
 	case K_ENTER:
@@ -4499,17 +4526,15 @@ static void M_ServerList_Key(cmd_state_t *cmd, int k, int ascii)
 
 //=============================================================================
 /* MODLIST MENU */
-// same limit of mod dirs as in fs.c
-#define MODLIST_MAXDIRS 16
-static int modlist_enabled [MODLIST_MAXDIRS];	//array of indexs to modlist
+// same limit of mod dirs as in fs.c (allowing that one is used by gamedirname1)
+#define MODLIST_MAXDIRS MAX_GAMEDIRS - 1
 static int modlist_numenabled;			//number of enabled (or in process to be..) mods
 
 typedef struct modlist_entry_s
 {
 	qbool loaded;	// used to determine whether this entry is loaded and running
-	int enabled;		// index to array of modlist_enabled
 
-	// name of the modification, this is (will...be) displayed on the menu entry
+	// name of the modification, this is displayed on the menu entry
 	char name[128];
 	// directory where we will find it
 	char dir[MAX_QPATH];
@@ -4526,17 +4551,15 @@ static void ModList_RebuildList(void)
 	int i,j;
 	stringlist_t list;
 	const char *description;
+	int desc_len;
 
 	stringlistinit(&list);
 	listdirectory(&list, fs_basedir, "");
 	stringlistsort(&list, true);
 	modlist_count = 0;
-	modlist_numenabled = fs_numgamedirs;
+	modlist_numenabled = 0;
 	for (i = 0;i < list.numstrings && modlist_count < MODLIST_TOTALSIZE;i++)
 	{
-		// quickly skip names with dot characters - generally these are files, not directories
-		if (strchr(list.strings[i], '.')) continue;
-
 		// reject any dirs that are part of the base game
 		if (gamedirname1 && !strcasecmp(gamedirname1, list.strings[i])) continue;
 		//if (gamedirname2 && !strcasecmp(gamedirname2, list.strings[i])) continue;
@@ -4547,18 +4570,26 @@ static void ModList_RebuildList(void)
 		description = FS_CheckGameDir(list.strings[i]);
 		if (description == NULL || description == fs_checkgamedir_missing) continue;
 
-		strlcpy (modlist[modlist_count].dir, list.strings[i], sizeof(modlist[modlist_count].dir));
-		//check currently loaded mods
+		desc_len = min(strlen(description), sizeof(modlist[modlist_count].name));
+		for (j = 0; j < desc_len; ++j)
+			if (!ISWHITESPACE(description[j]))
+			{
+				dp_strlcpy(modlist[modlist_count].name, description, sizeof(modlist[modlist_count].name));
+				break;
+			}
+
+		dp_strlcpy (modlist[modlist_count].dir, list.strings[i], sizeof(modlist[modlist_count].dir));
+
+		// check if this mod is currently loaded
 		modlist[modlist_count].loaded = false;
-		if (fs_numgamedirs)
-			for (j = 0; j < fs_numgamedirs; j++)
-				if (!strcasecmp(fs_gamedirs[j], modlist[modlist_count].dir))
-				{
-					modlist[modlist_count].loaded = true;
-					modlist[modlist_count].enabled = j;
-					modlist_enabled[j] = modlist_count;
-					break;
-				}
+		for (j = 0; j < fs_numgamedirs; j++)
+			if (!strcasecmp(fs_gamedirs[j], modlist[modlist_count].dir))
+			{
+				modlist[modlist_count].loaded = true;
+				modlist_numenabled++;
+				break;
+			}
+
 		modlist_count ++;
 	}
 	stringlistfreecontents(&list);
@@ -4568,22 +4599,7 @@ static void ModList_Enable (void)
 {
 	int i;
 	int numgamedirs;
-	char gamedirs[MODLIST_MAXDIRS][MAX_QPATH];
-
-	// copy our mod list into an array for FS_ChangeGameDirs
-	numgamedirs = modlist_numenabled;
-	for (i = 0; i < modlist_numenabled; i++)
-		strlcpy (gamedirs[i], modlist[modlist_enabled[i]].dir,sizeof (gamedirs[i]));
-
-	// this code snippet is from FS_ChangeGameDirs
-	if (fs_numgamedirs == numgamedirs)
-	{
-		for (i = 0;i < numgamedirs;i++)
-			if (strcasecmp(fs_gamedirs[i], gamedirs[i]))
-				break;
-		if (i == numgamedirs)
-			return; // already using this set of gamedirs, do nothing
-	}
+	const char *gamedirs[MODLIST_MAXDIRS];
 
 	// this part is basically the same as the FS_GameDir_f function
 	if ((cls.state == ca_connected && !cls.demoplayback) || sv.active)
@@ -4593,7 +4609,18 @@ static void ModList_Enable (void)
 		return;
 	}
 
-	FS_ChangeGameDirs (modlist_numenabled, gamedirs, true, true);
+	// copy our mod list into an array for FS_ChangeGameDirs
+	for (i = 0, numgamedirs = 0; i < modlist_count && numgamedirs < MODLIST_MAXDIRS; i++)
+		if (modlist[i].loaded)
+			gamedirs[numgamedirs++] = modlist[i].dir;
+	// allow disabling all active mods using the menu
+	if (numgamedirs == 0)
+	{
+		numgamedirs = 1;
+		gamedirs[0] = gamedirname1;
+	}
+
+	FS_ChangeGameDirs(numgamedirs, gamedirs, true);
 }
 
 void M_Menu_ModList_f(cmd_state_t *cmd)
@@ -4602,34 +4629,19 @@ void M_Menu_ModList_f(cmd_state_t *cmd)
 	m_state = m_modlist;
 	m_entersound = true;
 	modlist_cursor = 0;
-	M_Update_Return_Reason("");
+	cl_connect_status[0] = '\0';
 	ModList_RebuildList();
 }
 
 static void M_Menu_ModList_AdjustSliders (int dir)
 {
-	int i;
 	S_LocalSound ("sound/misc/menu3.wav");
 
 	// stop adding mods, we reach the limit
 	if (!modlist[modlist_cursor].loaded && (modlist_numenabled == MODLIST_MAXDIRS)) return;
+
 	modlist[modlist_cursor].loaded = !modlist[modlist_cursor].loaded;
-	if (modlist[modlist_cursor].loaded)
-	{
-		modlist[modlist_cursor].enabled = modlist_numenabled;
-		//push the value on the enabled list
-		modlist_enabled[modlist_numenabled++] = modlist_cursor;
-	}
-	else
-	{
-		//eliminate the value from the enabled list
-		for (i = modlist[modlist_cursor].enabled; i < modlist_numenabled; i++)
-		{
-			modlist_enabled[i] = modlist_enabled[i+1];
-			modlist[modlist_enabled[i]].enabled--;
-		}
-		modlist_numenabled--;
-	}
+	modlist_numenabled += modlist[modlist_cursor].loaded ? 1 : -1;
 }
 
 static void M_ModList_Draw (void)
@@ -4649,11 +4661,15 @@ static void M_ModList_Draw (void)
 	M_PrintRed(432, 32, s_enabled);
 	// Draw a list box with all enabled mods
 	DrawQ_Pic(menu_x + 432, menu_y + 48, NULL, 172, 8 * modlist_numenabled, 0, 0, 0, 0.5, 0);
-	for (y = 0; y < modlist_numenabled; y++)
-		M_PrintRed(432, 48 + y * 8, modlist[modlist_enabled[y]].dir);
+	for (n = 0, y = 48; n < modlist_count; n++)
+		if (modlist[n].loaded)
+		{
+			M_PrintRed(432, y, modlist[n].dir);
+			y += 8;
+		}
 
-	if (*m_return_reason)
-		M_Print(16, menu_height - 8, m_return_reason);
+	if (*cl_connect_status)
+		M_Print(16, menu_height - 8, cl_connect_status);
 	// scroll the list as the cursor moves
 	y = 48;
 	visible = (int)((menu_height - 16 - y) / 8 / 2);
@@ -4666,8 +4682,10 @@ static void M_ModList_Draw (void)
 	{
 		for (n = start;n < end;n++)
 		{
+			const char *item_label = (modlist[n].name[0] != '\0') ? modlist[n].name : modlist[n].dir;
+
 			DrawQ_Pic(menu_x + 40, menu_y + y, NULL, 360, 8, n == modlist_cursor ? (0.5 + 0.2 * sin(host.realtime * M_PI)) : 0, 0, 0, 0.5, 0);
-			M_ItemPrint(80, y, modlist[n].dir, true);
+			M_ItemPrint(80, y, item_label, true);
 			M_DrawCheckbox(48, y, modlist[n].loaded);
 			y +=8;
 		}
@@ -4903,8 +4921,6 @@ void M_Draw (void)
 		S_LocalSound ("sound/misc/menu2.wav");
 		m_entersound = false;
 	}
-
-	S_ExtraUpdate ();
 }
 
 
@@ -5031,15 +5047,22 @@ void M_Shutdown(void)
 //============================================================================
 // Menu prog handling
 
-static const char *m_required_func[] = {
-"m_init",
-"m_keydown",
-"m_draw",
-"m_toggle",
-"m_shutdown",
-};
+static void MP_CheckRequiredFuncs(prvm_prog_t *prog, const char *filename)
+{
+	int i;
+	const char *m_required_func[] = {
+		"m_init",
+		"m_keydown",
+		"m_draw",
+		"m_toggle",
+		"m_shutdown",
+	};
+	int m_numrequiredfunc = sizeof(m_required_func) / sizeof(char*);
 
-static int m_numrequiredfunc = sizeof(m_required_func) / sizeof(char*);
+	for(i = 0; i < m_numrequiredfunc; ++i)
+		if(PRVM_ED_FindFunction(prog, m_required_func[i]) == 0)
+			prog->error_cmd("%s: %s not found in %s",prog->name, m_required_func[i], filename);
+}
 
 static prvm_required_field_t m_required_fields[] =
 {
@@ -5201,46 +5224,51 @@ static int m_numrequiredglobals = sizeof(m_required_globals) / sizeof(m_required
 
 void MR_SetRouting (qbool forceold);
 
-void MVM_error_cmd(const char *format, ...) DP_FUNC_PRINTF(1);
-void MVM_error_cmd(const char *format, ...)
+jmp_buf mp_abort;
+static void MVM_error_cmd(const char *format, ...) DP_FUNC_PRINTF(1) DP_FUNC_NORETURN;
+static void MVM_error_cmd(const char *format, ...)
 {
-	prvm_prog_t *prog = MVM_prog;
 	static qbool processingError = false;
 	char errorstring[MAX_INPUTLINE];
 	va_list argptr;
+	int outfd = sys.outfd;
+
+	// set output to stderr
+	sys.outfd = fileno(stderr);
 
 	va_start (argptr, format);
 	dpvsnprintf (errorstring, sizeof(errorstring), format, argptr);
 	va_end (argptr);
 
-	if (host.framecount < 3)
-		Sys_Error("Menu_Error: %s\n", errorstring);
+	Con_Printf(CON_ERROR "Menu_Error: %s\n", errorstring);
 
-	Con_Printf( "Menu_Error: %s\n", errorstring );
-
-	if( !processingError ) {
+	if(!processingError)
+	{
 		processingError = true;
-		PRVM_Crash(prog);
+		PRVM_Crash();
 		processingError = false;
-	} else {
-		Con_Printf( "Menu_Error: Recursive call to MVM_error_cmd (from PRVM_Crash)!\n" );
 	}
+	else
+		Sys_Error("Menu_Error: Recursive call to MVM_error_cmd (from PRVM_Crash)!");
 
-	// fall back to the normal menu
-
-	// say it
-	Con_Print("Falling back to normal menu\n");
-
+	Con_Print("Falling back to engine menu\n");
 	key_dest = key_game;
-
-	// init the normal menu now -> this will also correct the menu router pointers
 	MR_SetRouting (true);
+	mp_failed = true;
+	if (cls.state != ca_connected || key_dest != key_game) // if not disrupting a game
+		MR_ToggleMenu(1); // ensure error screen appears, eg for: menu_progs ""; menu_restart
 
 	// reset the active scene, too (to be on the safe side ;))
 	R_SelectScene( RST_CLIENT );
 
-	// Let video start at least
-	Host_AbortCurrentFrame();
+	// prevent an endless loop if the error was triggered by a command
+	Cbuf_Clear(cmd_local->cbuf);
+
+	// restore configured outfd
+	sys.outfd = outfd;
+
+	// no frame abort: menu failure shouldn't interfere with more important VMs
+	longjmp(mp_abort, 1);
 }
 
 static void MVM_begin_increase_edicts(prvm_prog_t *prog)
@@ -5287,6 +5315,9 @@ static void MP_KeyEvent (int key, int ascii, qbool downevent)
 {
 	prvm_prog_t *prog = MVM_prog;
 
+	if (setjmp(mp_abort))
+		return;
+
 	// pass key
 	prog->globals.fp[OFS_PARM0] = (prvm_vec_t) key;
 	prog->globals.fp[OFS_PARM1] = (prvm_vec_t) ascii;
@@ -5299,9 +5330,14 @@ static void MP_KeyEvent (int key, int ascii, qbool downevent)
 static void MP_Draw (void)
 {
 	prvm_prog_t *prog = MVM_prog;
-	// declarations that are needed right now
-
 	float oldquality;
+
+	// don't crash if we draw a frame between prog shutdown and restart, see Host_LoadConfig_f
+	if (!prog->loaded)
+		return;
+
+	if (setjmp(mp_abort))
+		return;
 
 	R_SelectScene( RST_MENU );
 
@@ -5319,8 +5355,8 @@ static void MP_Draw (void)
 
 	// FIXME: this really shouldnt error out lest we have a very broken refdef state...?
 	// or does it kill the server too?
-	PRVM_G_FLOAT(OFS_PARM0) = vid.width;
-	PRVM_G_FLOAT(OFS_PARM1) = vid.height;
+	PRVM_G_FLOAT(OFS_PARM0) = vid.mode.width;
+	PRVM_G_FLOAT(OFS_PARM1) = vid.mode.height;
 	prog->ExecuteProgram(prog, PRVM_menufunction(m_draw),"m_draw() required");
 
 	// TODO: imo this should be moved into scene, too [1/27/2008 Andreas]
@@ -5333,6 +5369,9 @@ static void MP_ToggleMenu(int mode)
 {
 	prvm_prog_t *prog = MVM_prog;
 
+	if (setjmp(mp_abort))
+		return;
+
 	prog->globals.fp[OFS_PARM0] = (prvm_vec_t) mode;
 	prog->ExecuteProgram(prog, PRVM_menufunction(m_toggle),"m_toggle(float mode) required");
 }
@@ -5340,6 +5379,10 @@ static void MP_ToggleMenu(int mode)
 static void MP_NewMap(void)
 {
 	prvm_prog_t *prog = MVM_prog;
+
+	if (setjmp(mp_abort))
+		return;
+
 	if (PRVM_menufunction(m_newmap))
 		prog->ExecuteProgram(prog, PRVM_menufunction(m_newmap),"m_newmap() required");
 }
@@ -5348,6 +5391,10 @@ const serverlist_entry_t *serverlist_callbackentry = NULL;
 static int MP_GetServerListEntryCategory(const serverlist_entry_t *entry)
 {
 	prvm_prog_t *prog = MVM_prog;
+
+	if (setjmp(mp_abort))
+		return 0;
+
 	serverlist_callbackentry = entry;
 	if (PRVM_menufunction(m_gethostcachecategory))
 	{
@@ -5365,6 +5412,10 @@ static int MP_GetServerListEntryCategory(const serverlist_entry_t *entry)
 static void MP_Shutdown (void)
 {
 	prvm_prog_t *prog = MVM_prog;
+
+	if (setjmp(mp_abort))
+		return;
+
 	if (prog->loaded)
 		prog->ExecuteProgram(prog, PRVM_menufunction(m_shutdown),"m_shutdown() required");
 
@@ -5378,6 +5429,10 @@ static void MP_Shutdown (void)
 static void MP_Init (void)
 {
 	prvm_prog_t *prog = MVM_prog;
+
+	if (setjmp(mp_abort))
+		return;
+
 	PRVM_Prog_Init(prog, cmd_local);
 
 	prog->edictprivate_size = 0; // no private struct used
@@ -5403,7 +5458,7 @@ static void MP_Init (void)
 	// allocate the mempools
 	prog->progs_mempool = Mem_AllocPool(menu_progs.string, 0, NULL);
 
-	PRVM_Prog_Load(prog, menu_progs.string, NULL, 0, m_numrequiredfunc, m_required_func, m_numrequiredfields, m_required_fields, m_numrequiredglobals, m_required_globals);
+	PRVM_Prog_Load(prog, menu_progs.string, NULL, 0, MP_CheckRequiredFuncs, m_numrequiredfields, m_required_fields, m_numrequiredglobals, m_required_globals);
 
 	// note: OP_STATE is not supported by menu qc, we don't even try to detect
 	// it here
@@ -5458,7 +5513,7 @@ void MR_Restart(void)
 {
 	if(MR_Shutdown)
 		MR_Shutdown ();
-	MR_SetRouting (false);
+	MR_Init();
 }
 
 static void MR_Restart_f(cmd_state_t *cmd)
@@ -5608,7 +5663,7 @@ void MR_Init(void)
 	}
 
 	menu_video_resolutions_forfullscreen = !!vid_fullscreen.integer;
-	M_Menu_Video_FindResolution(vid.width, vid.height, vid_pixelheight.value);
+	M_Menu_Video_FindResolution(vid.mode.width, vid.mode.height, vid_pixelheight.value);
 
 	// use -forceqmenu to use always the normal quake menu (it sets forceqmenu to 1)
 // COMMANDLINEOPTION: Client: -forceqmenu disables menu.dat (same as +forceqmenu 1)

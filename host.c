@@ -42,10 +42,8 @@ host_static_t host;
 
 // pretend frames take this amount of time (in seconds), 0 = realtime
 cvar_t host_framerate = {CF_CLIENT | CF_SERVER, "host_framerate","0", "locks frame timing to this value in seconds, 0.05 is 20fps for example, note that this can easily run too fast, use cl_maxfps if you want to limit your framerate instead, or sys_ticrate to limit server speed"};
-cvar_t cl_maxphysicsframesperserverframe = {CF_CLIENT, "cl_maxphysicsframesperserverframe","10", "maximum number of physics frames per server frame"};
 // shows time used by certain subsystems
 cvar_t host_speeds = {CF_CLIENT | CF_SERVER, "host_speeds","0", "reports how much time is used in server/graphics/sound"};
-cvar_t host_maxwait = {CF_CLIENT | CF_SERVER, "host_maxwait","1000", "maximum sleep time requested from the operating system in millisecond. Larger sleeps will be done using multiple host_maxwait length sleeps. Lowering this value will increase CPU load, but may help working around problems with accuracy of sleep times."};
 
 cvar_t developer = {CF_CLIENT | CF_SERVER | CF_ARCHIVE, "developer","0", "shows debugging messages and information (recommended for all developers and level designers); the value -1 also suppresses buffering and logging these messages"};
 cvar_t developer_extra = {CF_CLIENT | CF_SERVER, "developer_extra", "0", "prints additional debugging messages, often very verbose!"};
@@ -90,6 +88,10 @@ void Host_Error (const char *error, ...)
 	static char hosterrorstring2[MAX_INPUTLINE]; // THREAD UNSAFE
 	static qbool hosterror = false;
 	va_list argptr;
+	int outfd = sys.outfd;
+
+	// set output to stderr
+	sys.outfd = fileno(stderr);
 
 	// turn off rcon redirect if it was active when the crash occurred
 	// to prevent loops when it is a networking problem
@@ -103,42 +105,39 @@ void Host_Error (const char *error, ...)
 
 	// LadyHavoc: if crashing very early, or currently shutting down, do
 	// Sys_Error instead
-	if (host.framecount < 3 || host.state == host_shutdown)
-		Sys_Error ("Host_Error: %s", hosterrorstring1);
+	if (host.framecount < 1 || host.state != host_active)
+		Sys_Error ("Host_Error during %s: %s", host_state_str[host.state], hosterrorstring1);
 
 	if (hosterror)
 		Sys_Error ("Host_Error: recursively entered (original error was: %s    new error is: %s)", hosterrorstring2, hosterrorstring1);
 	hosterror = true;
 
-	strlcpy(hosterrorstring2, hosterrorstring1, sizeof(hosterrorstring2));
+	dp_strlcpy(hosterrorstring2, hosterrorstring1, sizeof(hosterrorstring2));
 
 	CL_Parse_DumpPacket();
-
 	CL_Parse_ErrorCleanUp();
 
-	//PR_Crash();
-
 	// print out where the crash happened, if it was caused by QC (and do a cleanup)
-	PRVM_Crash(SVVM_prog);
-	PRVM_Crash(CLVM_prog);
-#ifdef CONFIG_MENU
-	PRVM_Crash(MVM_prog);
-#endif
-
-	Cvar_SetValueQuick(&csqc_progcrc, -1);
-	Cvar_SetValueQuick(&csqc_progsize, -1);
+	PRVM_Crash();
 
 	if(host.hook.SV_Shutdown)
 		host.hook.SV_Shutdown();
 
 	if (cls.state == ca_dedicated)
-		Sys_Error ("Host_Error: %s",hosterrorstring2);	// dedicated servers exit
+		Sys_Error("Host_Error: %s", hosterrorstring1);        // dedicated servers exit
 
-	CL_Disconnect();
-	cls.demonum = -1;
+	// prevent an endless loop if the error was triggered by a command
+	Cbuf_Clear(cmd_local->cbuf);
+
+	CL_DisconnectEx(false, "Host_Error: %s", hosterrorstring1);
+	cls.demonum = -1; // stop demo loop
 
 	hosterror = false;
 
+	// restore configured outfd
+	sys.outfd = outfd;
+
+	// can't abort a frame if we didn't start one yet, won't get here in that case (see above)
 	Host_AbortCurrentFrame();
 }
 
@@ -157,7 +156,12 @@ static void Host_Quit_f(cmd_state_t *cmd)
 
 static void Host_Version_f(cmd_state_t *cmd)
 {
-	Con_Printf("Version: %s build %s\n", gamename, buildstring);
+	Con_Printf("Version: %s\n", engineversion);
+}
+
+void Host_UpdateVersion(void)
+{
+	dpsnprintf(engineversion, sizeof(engineversion), "%s %s%s %s", gamename ? gamename : "DarkPlaces", DP_OS_NAME, cls.state == ca_dedicated ? " dedicated" : "", buildstring);
 }
 
 static void Host_Framerate_c(cvar_t *var)
@@ -200,13 +204,17 @@ void Host_SaveConfig(const char *file)
 		f = FS_OpenRealFile(file, "wb", false);
 		if (!f)
 		{
-			Con_Printf(CON_ERROR "Couldn't write %s.\n", file);
+			Con_Printf(CON_ERROR "Couldn't write %s\n", file);
 			return;
 		}
+		else
+			Con_Printf("Saving config to %s ...\n", file);
 
 		Key_WriteBindings (f);
 		Cvar_WriteVariables (&cvars_all, f);
-
+#ifdef __EMSCRIPTEN__
+		js_syncFS(false);
+#endif
 		FS_Close (f);
 	}
 }
@@ -215,10 +223,8 @@ static void Host_SaveConfig_f(cmd_state_t *cmd)
 {
 	const char *file = CONFIGFILENAME;
 
-	if(Cmd_Argc(cmd) >= 2) {
+	if(Cmd_Argc(cmd) >= 2)
 		file = Cmd_Argv(cmd, 1);
-		Con_Printf("Saving to %s\n", file);
-	}
 
 	Host_SaveConfig(file);
 }
@@ -235,7 +241,10 @@ static void Host_AddConfigText(cmd_state_t *cmd)
 		Cbuf_InsertText(cmd, "alias startmap_sp \"map start\"\nalias startmap_dm \"map start\"\nexec teu.rc\n");
 	else
 		Cbuf_InsertText(cmd, "alias startmap_sp \"map start\"\nalias startmap_dm \"map start\"\nexec " STARTCONFIGFILENAME "\n");
-	Cbuf_Execute(cmd->cbuf);
+
+	// if quake.rc is missing, use default
+	if (!FS_FileExists(STARTCONFIGFILENAME))
+		Cbuf_InsertText(cmd, "exec default.cfg\nexec " CONFIGFILENAME "\nexec autoexec.cfg\n");
 }
 
 /*
@@ -247,14 +256,18 @@ Resets key bindings and cvars to defaults and then reloads scripts
 */
 static void Host_LoadConfig_f(cmd_state_t *cmd)
 {
-	// reset all cvars, commands and aliases to init values
+#ifdef CONFIG_MENU
+	// Xonotic QC complains/breaks if its cvars are deleted before its m_shutdown() is called
+	if(MR_Shutdown)
+		MR_Shutdown();
+#endif
 	Cmd_RestoreInitState();
 #ifdef CONFIG_MENU
-	// prepend a menu restart command to execute after the config
-	Cbuf_InsertText(cmd_local, "\nmenu_restart\n");
+	// Must re-add menu.c commands or load menu.dat before executing quake.rc or handling events
+	MR_Init();
 #endif
-	// reset cvars to their defaults, and then exec startup scripts again
-	Host_AddConfigText(cmd_local);
+	// exec startup scripts again
+	Host_AddConfigText(cmd);
 }
 
 /*
@@ -270,11 +283,9 @@ static void Host_InitLocal (void)
 	Cmd_AddCommand(CF_SHARED, "saveconfig", Host_SaveConfig_f, "save settings to config.cfg (or a specified filename) immediately (also automatic when quitting)");
 	Cmd_AddCommand(CF_SHARED, "loadconfig", Host_LoadConfig_f, "reset everything and reload configs");
 	Cmd_AddCommand(CF_SHARED, "sendcvar", SendCvar_f, "sends the value of a cvar to the server as a sentcvar command, for use by QuakeC");
-	Cvar_RegisterVariable (&cl_maxphysicsframesperserverframe);
 	Cvar_RegisterVariable (&host_framerate);
 	Cvar_RegisterCallback (&host_framerate, Host_Framerate_c);
 	Cvar_RegisterVariable (&host_speeds);
-	Cvar_RegisterVariable (&host_maxwait);
 	Cvar_RegisterVariable (&host_isclient);
 
 	Cvar_RegisterVariable (&developer);
@@ -290,9 +301,8 @@ static void Host_InitLocal (void)
 	Cvar_RegisterVariable (&r_texture_jpeg_fastpicmip);
 }
 
-char engineversion[128];
+char engineversion[128]; ///< version string for the corner of the console, crash messages, status command, etc
 
-qbool sys_nostdout = false;
 
 static qfile_t *locksession_fh = NULL;
 static qbool locksession_run = false;
@@ -364,22 +374,24 @@ void Host_UnlockSession(void)
 Host_Init
 ====================
 */
-static void Host_Init (void)
+void Host_Init (void)
 {
 	int i;
-	const char* os;
 	char vabuf[1024];
+
+	Sys_SDL_Init();
+
+	Memory_Init();
 
 	host.hook.ConnectLocal = NULL;
 	host.hook.Disconnect = NULL;
 	host.hook.ToggleMenu = NULL;
-	host.hook.CL_Intermission = NULL;
 	host.hook.SV_Shutdown = NULL;
 
 	host.state = host_init;
 
-	if (setjmp(host.abortframe)) // Huh?!
-		Sys_Error("Engine initialization failed. Check the console (if available) for additional information.\n");
+	host.realtime = 0;
+	host.dirtytime = Sys_DirtyTime();
 
 	if (Sys_CheckParm("-profilegameonly"))
 		Sys_AllowProfiling(false);
@@ -420,9 +432,13 @@ static void Host_Init (void)
 		gl_printcheckerror.integer = 1;gl_printcheckerror.string = "1";
 	}
 
-// COMMANDLINEOPTION: Console: -nostdout disables text output to the terminal the game was launched from
-	if (Sys_CheckParm("-nostdout"))
-		sys_nostdout = 1;
+	// -dedicated is checked in SV_ServerOptions() but that's too late for Cvar_RegisterVariable() to skip all the client-only cvars
+	if (Sys_CheckParm ("-dedicated") || !cl_available)
+		cls.state = ca_dedicated;
+
+	// set and print initial version string (will be updated when gamename is changed)
+	Host_UpdateVersion(); // checks for cls.state == ca_dedicated
+	Con_Printf("%s\n", engineversion);
 
 	// initialize console command/cvar/alias/command execution systems
 	Cmd_Init();
@@ -431,6 +447,7 @@ static void Host_Init (void)
 	Memory_Init_Commands();
 
 	// initialize console and logging and its cvars/commands
+	// this enables Con_Printf() messages to be coloured
 	Con_Init();
 
 	// initialize various cvars that could not be initialized earlier
@@ -439,13 +456,8 @@ static void Host_Init (void)
 	Sys_Init_Commands();
 	COM_Init_Commands();
 
-	// initialize filesystem (including fs_basedir, fs_gamedir, -game, scr_screenshot_name)
+	// initialize filesystem (including fs_basedir, fs_gamedir, -game, scr_screenshot_name, gamename)
 	FS_Init();
-
-	// construct a version string for the corner of the console
-	os = DP_OS_NAME;
-	dpsnprintf (engineversion, sizeof (engineversion), "%s %s %s", gamename, os, buildstring);
-	Con_Printf("%s\n", engineversion);
 
 	// initialize process nice level
 	Sys_InitProcessNice();
@@ -477,32 +489,25 @@ static void Host_Init (void)
 	// NOTE: menu commands are freed by Cmd_RestoreInitState
 	Cmd_SaveInitState();
 
-	// FIXME: put this into some neat design, but the menu should be allowed to crash
-	// without crashing the whole game, so this should just be a short-time solution
-
 	// here comes the not so critical stuff
 
 	Host_AddConfigText(cmd_local);
-
-	// if quake.rc is missing, use default
-	if (!FS_FileExists("quake.rc"))
-	{
-		Cbuf_AddText(cmd_local, "exec default.cfg\nexec " CONFIGFILENAME "\nexec autoexec.cfg\n");
-		Cbuf_Execute(cmd_local->cbuf);
-	}
-
-	host.state = host_active;
+	Cbuf_Execute(cmd_local->cbuf); // cannot be in Host_AddConfigText as that would cause Host_LoadConfig_f to loop!
 
 	CL_StartVideo();
 
 	Log_Start();
 
-	// put up the loading image so the user doesn't stare at a black screen...
-	SCR_BeginLoadingPlaque(true);
-#ifdef CONFIG_MENU
 	if (cls.state != ca_dedicated)
+	{
+		// put up the loading image so the user doesn't stare at a black screen...
+		SCR_BeginLoadingPlaque(true);
+		S_Startup();
+#ifdef CONFIG_MENU
 		MR_Init();
 #endif
+	}
+
 	// check for special benchmark mode
 // COMMANDLINEOPTION: Client: -benchmark <demoname> runs a timedemo and quits, results of any timedemo can be found in gamedir/benchmark.log (for example id1/benchmark.log)
 	i = Sys_CheckParm("-benchmark");
@@ -550,6 +555,7 @@ static void Host_Init (void)
 	}
 
 	Con_DPrint("========Initialized=========\n");
+	host.state = host_active;
 
 	if (cls.state != ca_dedicated)
 		SV_StartThread();
@@ -559,25 +565,13 @@ static void Host_Init (void)
 ===============
 Host_Shutdown
 
-FIXME: this is a callback from Sys_Quit and Sys_Error.  It would be better
-to run quit through here before the final handoff to the sys code.
+Cleanly shuts down, Host_Frame() must not be called again after this.
 ===============
 */
 void Host_Shutdown(void)
 {
-	static qbool isdown = false;
-
-	if (isdown)
-	{
-		Con_Print("recursive shutdown\n");
-		return;
-	}
-	if (setjmp(host.abortframe))
-	{
-		Con_Print("aborted the quitting frame?!?\n");
-		return;
-	}
-	isdown = true;
+	if (Sys_CheckParm("-profilegameonly"))
+		Sys_AllowProfiling(false);
 
 	if(cls.state != ca_dedicated)
 		CL_Shutdown();
@@ -602,7 +596,7 @@ void Host_Shutdown(void)
 	TaskQueue_Shutdown();
 	Thread_Shutdown();
 	Cmd_Shutdown();
-	Sys_Shutdown();
+	Sys_SDL_Shutdown();
 	Log_Close();
 	Crypto_Shutdown();
 
@@ -621,9 +615,11 @@ Host_Frame
 Runs all active servers
 ==================
 */
-static double Host_Frame(double time)
+double Host_Frame(double time)
 {
 	double cl_wait, sv_wait;
+
+	++host.framecount;
 
 	TaskQueue_Frame(false);
 
@@ -638,112 +634,24 @@ static double Host_Frame(double time)
 	// Run any downloads
 	Curl_Frame();
 
+	// get new SDL events and add commands from keybindings to the cbuf
+	Sys_SDL_HandleEvents();
+
 	// process console commands
 	Cbuf_Frame(host.cbuf);
 
 	R_TimeReport("---");
 
-	sv_wait = SV_Frame(time);
-	cl_wait = CL_Frame(time);
-
-//	Con_Printf("%6.0f %6.0f\n", cl_wait * 1000000.0, sv_wait * 1000000.0);
+	// if the accumulators haven't become positive yet, wait a while
+	sv_wait = - SV_Frame(time);
+	cl_wait = - CL_Frame(time);
 
 	Mem_CheckSentinelsGlobal();
 
-	if(host.restless)
-		return 0;
-
-	// if the accumulators haven't become positive yet, wait a while
 	if (cls.state == ca_dedicated)
-		return sv_wait * -1000000.0; // dedicated
+		return sv_wait; // dedicated
 	else if (!sv.active || svs.threaded)
-		return cl_wait * -1000000.0; // connected to server, main menu, or server is on different thread
+		return cl_wait; // connected to server, main menu, or server is on different thread
 	else
-		return max(cl_wait, sv_wait) * -1000000.0; // listen server or singleplayer
-}
-
-static inline void Host_Sleep(double time)
-{
-	double delta, time0;
-
-	if(host_maxwait.value <= 0)
-		time = min(time, 1000000.0);
-	else
-		time = min(time, host_maxwait.value * 1000.0);
-	if(time < 1)
-		time = 1; // because we cast to int
-
-	time0 = Sys_DirtyTime();
-	if (sv_checkforpacketsduringsleep.integer && !sys_usenoclockbutbenchmark.integer && !svs.threaded) {
-		NetConn_SleepMicroseconds((int)time);
-		if (cls.state != ca_dedicated)
-			NetConn_ClientFrame(); // helps server browser get good ping values
-		// TODO can we do the same for ServerFrame? Probably not.
-	}
-	else
-		Sys_Sleep((int)time);
-	delta = Sys_DirtyTime() - time0;
-	if (delta < 0 || delta >= 1800)
-		delta = 0;
-	host.sleeptime += delta;
-//			R_TimeReport("sleep");
-	return;
-}
-
-// Cloudwalk: Most overpowered function declaration...
-static inline double Host_UpdateTime (double newtime, double oldtime)
-{
-	double time = newtime - oldtime;
-
-	if (time < 0)
-	{
-		// warn if it's significant
-		if (time < -0.01)
-			Con_Printf(CON_WARN "Host_UpdateTime: time stepped backwards (went from %f to %f, difference %f)\n", oldtime, newtime, time);
-		time = 0;
-	}
-	else if (time >= 1800)
-	{
-		Con_Printf(CON_WARN "Host_UpdateTime: time stepped forward (went from %f to %f, difference %f)\n", oldtime, newtime, time);
-		time = 0;
-	}
-
-	return time;
-}
-
-void Host_Main(void)
-{
-	double time, newtime, oldtime, sleeptime;
-
-	Host_Init(); // Start!
-
-	host.realtime = 0;
-	oldtime = Sys_DirtyTime();
-
-	// Main event loop
-	while(host.state != host_shutdown)
-	{
-		// Something bad happened, or the server disconnected
-		if (setjmp(host.abortframe))
-		{
-			host.state = host_active; // In case we were loading
-			continue;
-		}
-
-		newtime = host.dirtytime = Sys_DirtyTime();
-		host.realtime += time = Host_UpdateTime(newtime, oldtime);
-
-		sleeptime = Host_Frame(time);
-		oldtime = newtime;
-
-		if (sleeptime >= 1)
-		{
-			Host_Sleep(sleeptime);
-			continue;
-		}
-
-		host.framecount++;
-	}
-
-	return;
+		return min(cl_wait, sv_wait); // listen server or singleplayer
 }

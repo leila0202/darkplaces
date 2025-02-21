@@ -43,7 +43,7 @@ extern char fs_basedir [MAX_OSPATH];
 extern char fs_userdir [MAX_OSPATH];
 
 // list of active game directories (empty if not running a mod)
-#define MAX_GAMEDIRS 16
+#define MAX_GAMEDIRS 17 // 16 + gamedirname1
 extern int fs_numgamedirs;
 extern char fs_gamedirs[MAX_GAMEDIRS][MAX_QPATH];
 
@@ -61,7 +61,7 @@ typedef struct vfs_s
 // IMPORTANT: the file path is automatically prefixed by the current game directory for
 // each file created by FS_WriteFile, or opened in "write" or "append" mode by FS_OpenRealFile
 
-qbool FS_AddPack(const char *pakfile, qbool *already_loaded, qbool keep_plain_dirs); // already_loaded may be NULL if caller does not care
+qbool FS_AddPack(const char *pakfile, qbool *already_loaded, qbool keep_plain_dirs, qbool dlcache); // already_loaded may be NULL if caller does not care
 const char *FS_WhichPack(const char *filename);
 void FS_CreatePath (char *path);
 int FS_SysOpenFD(const char *filepath, const char *mode, qbool nonblocking); // uses absolute path
@@ -99,9 +99,16 @@ gamedir_t;
 extern gamedir_t *fs_all_gamedirs; // terminated by entry with empty name
 extern int fs_all_gamedirs_count;
 
-qbool FS_ChangeGameDirs(int numgamedirs, char gamedirs[][MAX_QPATH], qbool complain, qbool failmissing);
+typedef enum addgamedirs_e {
+	GAMEDIRS_ALLGOOD = -1,
+	GAMEDIRS_FAILURE = 0,
+	GAMEDIRS_SUCCESS = 1
+} addgamedirs_t;
+addgamedirs_t FS_SetGameDirs(int numgamedirs, const char *gamedirs[], qbool failmissing, qbool abortonfail);
+qbool FS_ChangeGameDirs(int numgamedirs, const char *gamedirs[], qbool failmissing);
 qbool FS_IsRegisteredQuakePack(const char *name);
 int FS_CRCFile(const char *filename, size_t *filesizepointer);
+void FS_UnloadPacks_dlcache(void);
 void FS_Rescan(void);
 
 typedef struct fssearch_s
@@ -130,11 +137,17 @@ void FS_DefaultExtension (char *path, const char *extension, size_t size_path);
 #define FS_FILETYPE_NONE 0
 #define FS_FILETYPE_FILE 1
 #define FS_FILETYPE_DIRECTORY 2
-int FS_FileType (const char *filename);		// the file can be into a package
-int FS_SysFileType (const char *filename);		// only look for files outside of packages
+/// Look for a file in the packages and in the filesystem
+int FS_FileType (const char *filename);
+/// Look for a file in the filesystem only
+int FS_SysFileType (const char *filename);
 
-qbool FS_FileExists (const char *filename);		// the file can be into a package
-qbool FS_SysFileExists (const char *filename);	// only look for files outside of packages
+/// Look for a file in the packages and in the filesystem
+/// Returns its canonical name (same case as used in the pack) if found, else NULL.
+/// If the file is found outside a pak, this will be the same pointer as passed in.
+const char *FS_FileExists (const char *filename);
+/// Look for a file in the filesystem only
+qbool FS_SysFileExists (const char *filename);
 
 unsigned char *FS_Deflate(const unsigned char *data, size_t size, size_t *deflated_size, int level, mempool_t *mempool);
 unsigned char *FS_Inflate(const unsigned char *data, size_t size, size_t *inflated_size, mempool_t *mempool);

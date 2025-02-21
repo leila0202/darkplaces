@@ -1,5 +1,6 @@
 /*
 Copyright (C) 1996-1997 Id Software, Inc.
+Copyright (C) 2020-2024 DarkPlaces Contributors
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -49,8 +50,6 @@ command from the console.  Active clients are kicked off.
 */
 static void SV_Map_f(cmd_state_t *cmd)
 {
-	char level[MAX_QPATH];
-
 	if (Cmd_Argc(cmd) != 2)
 	{
 		Con_Print("map <levelname> : start a new game (kicks off all players)\n");
@@ -78,8 +77,7 @@ static void SV_Map_f(cmd_state_t *cmd)
 		host.hook.ToggleMenu();
 
 	svs.serverflags = 0;			// haven't completed an episode yet
-	strlcpy(level, Cmd_Argv(cmd, 1), sizeof(level));
-	SV_SpawnServer(level);
+	SV_SpawnServer(Cmd_Argv(cmd, 1));
 
 	if(sv.active && host.hook.ConnectLocal != NULL)
 		host.hook.ConnectLocal();
@@ -94,8 +92,6 @@ Goes to a new map, taking all clients along
 */
 static void SV_Changelevel_f(cmd_state_t *cmd)
 {
-	char level[MAX_QPATH];
-
 	if (Cmd_Argc(cmd) != 2)
 	{
 		Con_Print("changelevel <levelname> : continue game on a new level\n");
@@ -104,7 +100,7 @@ static void SV_Changelevel_f(cmd_state_t *cmd)
 
 	if (!sv.active)
 	{
-		Con_Printf("You must be running a server to changelevel. Use 'map %s' instead\n", Cmd_Argv(cmd, 1));
+		SV_Map_f(cmd);
 		return;
 	}
 
@@ -112,9 +108,8 @@ static void SV_Changelevel_f(cmd_state_t *cmd)
 		host.hook.ToggleMenu();
 
 	SV_SaveSpawnparms ();
-	strlcpy(level, Cmd_Argv(cmd, 1), sizeof(level));
-	SV_SpawnServer(level);
-	
+	SV_SpawnServer(Cmd_Argv(cmd, 1));
+
 	if(sv.active && host.hook.ConnectLocal != NULL)
 		host.hook.ConnectLocal();
 }
@@ -128,8 +123,6 @@ Restarts the current server for a dead player
 */
 static void SV_Restart_f(cmd_state_t *cmd)
 {
-	char mapname[MAX_QPATH];
-
 	if (Cmd_Argc(cmd) != 1)
 	{
 		Con_Print("restart : restart current level\n");
@@ -144,9 +137,8 @@ static void SV_Restart_f(cmd_state_t *cmd)
 	if(host.hook.ToggleMenu)
 		host.hook.ToggleMenu();
 
-	strlcpy(mapname, sv.name, sizeof(mapname));
-	SV_SpawnServer(mapname);
-	
+	SV_SpawnServer(sv.worldbasename);
+
 	if(sv.active && host.hook.ConnectLocal != NULL)
 		host.hook.ConnectLocal();
 }
@@ -157,11 +149,11 @@ static void SV_Restart_f(cmd_state_t *cmd)
 static void SV_DisableCheats_c(cvar_t *var)
 {
 	prvm_prog_t *prog = SVVM_prog;
-	int i = 0;
+	int i;
 
-	if (var->value == 0)
+	if (prog->loaded && var->value == 0)
 	{
-		while (svs.clients[i].edict)
+		for (i = 0; i < svs.maxclients; ++i)
 		{
 			if (((int)PRVM_serveredictfloat(svs.clients[i].edict, flags) & FL_GODMODE))
 				PRVM_serveredictfloat(svs.clients[i].edict, flags) = (int)PRVM_serveredictfloat(svs.clients[i].edict, flags) ^ FL_GODMODE;
@@ -173,7 +165,6 @@ static void SV_DisableCheats_c(cvar_t *var)
 				noclip_anglehack = false;
 				PRVM_serveredictfloat(svs.clients[i].edict, movetype) = MOVETYPE_WALK;
 			}
-			i++;
 		}
 	}
 }
@@ -226,6 +217,7 @@ static void SV_Give_f(cmd_state_t *cmd)
 	prvm_prog_t *prog = SVVM_prog;
 	const char *t;
 	int v;
+	int player_items;
 
 	t = Cmd_Argv(cmd, 1);
 	v = atoi (Cmd_Argv(cmd, 2));
@@ -334,6 +326,49 @@ static void SV_Give_f(cmd_state_t *cmd)
 			if (PRVM_serveredictfloat(host_client->edict, weapon) > IT_LIGHTNING)
 				PRVM_serveredictfloat(host_client->edict, ammo_cells) = v;
 		}
+		break;
+	case 'a':
+		//
+		// Set the player armour value to the number specified and then adjust the armour type/colour based on the value
+		//
+ 		player_items = PRVM_serveredictfloat(host_client->edict, items);
+		PRVM_serveredictfloat(host_client->edict, armorvalue) = v;
+
+		// Remove whichever armour item the player currently has
+		if (gamemode == GAME_ROGUE)
+			player_items &= ~(RIT_ARMOR1 | RIT_ARMOR2 | RIT_ARMOR3);
+		else
+			player_items &= ~(IT_ARMOR1 | IT_ARMOR2 | IT_ARMOR3);
+
+		if (v > 150)
+		{
+			// Give red armour
+			PRVM_serveredictfloat(host_client->edict, armortype) = 0.8;
+			if (gamemode == GAME_ROGUE)
+				player_items |= RIT_ARMOR3;
+			else
+				player_items |= IT_ARMOR3;
+		}
+		else if (v > 100)
+		{
+			// Give yellow armour
+			PRVM_serveredictfloat(host_client->edict, armortype) = 0.6;
+			if (gamemode == GAME_ROGUE)
+				player_items |= RIT_ARMOR2;
+			else
+				player_items |= IT_ARMOR2;
+		}
+		else if (v >= 0)
+		{
+			// Give green armour
+			PRVM_serveredictfloat(host_client->edict, armortype) = 0.3;
+			if (gamemode == GAME_ROGUE)
+				player_items |= RIT_ARMOR1;
+			else
+				player_items |= IT_ARMOR1;
+		}
+
+		PRVM_serveredictfloat(host_client->edict, items) = player_items;
 		break;
 	}
 }
@@ -469,7 +504,7 @@ static void SV_Say(cmd_state_t *cmd, qbool teamonly)
 		p2[-1] = 0;
 		p2--;
 	}
-	strlcat(text, "\n", sizeof(text));
+	dp_strlcat(text, "\n", sizeof(text));
 
 	// note: save is not a valid edict if fromServer is true
 	save = host_client;
@@ -736,10 +771,11 @@ static void SV_Status_f(cmd_state_t *cmd)
 	for (players = 0, i = 0;i < svs.maxclients;i++)
 		if (svs.clients[i].active)
 			players++;
+
 	print ("host:     %s\n", Cvar_VariableString (&cvars_all, "hostname", CF_SERVER));
-	print ("version:  %s build %s (gamename %s)\n", gamename, buildstring, gamenetworkfiltername);
+	print ("version:  %s\n", engineversion);
 	print ("protocol: %i (%s)\n", Protocol_NumberForEnum(sv.protocol), Protocol_NameForEnum(sv.protocol));
-	print ("map:      %s\n", sv.name);
+	print ("map:      %s\n", sv.worldbasename);
 	print ("timing:   %s\n", SV_TimingReport(vabuf, sizeof(vabuf)));
 	print ("players:  %i active (%i max)\n\n", players, svs.maxclients);
 
@@ -779,9 +815,9 @@ static void SV_Status_f(cmd_state_t *cmd)
 		}
 
 		if(sv_status_privacy.integer && cmd->source != src_local && LHNETADDRESS_GetAddressType(&host_client->netconnection->peeraddress) != LHNETADDRESSTYPE_LOOP)
-			strlcpy(ip, client->netconnection ? "hidden" : "botclient", 48);
+			dp_strlcpy(ip, client->netconnection ? "hidden" : "botclient", 48);
 		else
-			strlcpy(ip, (client->netconnection && *client->netconnection->address) ? client->netconnection->address : "botclient", 48);
+			dp_strlcpy(ip, (client->netconnection && *client->netconnection->address) ? client->netconnection->address : "botclient", 48);
 
 		frags = client->frags;
 
@@ -835,9 +871,9 @@ void SV_Name(int clientnum)
 	PRVM_serveredictstring(host_client->edict, netname) = PRVM_SetEngineString(prog, host_client->name);
 	if (strcmp(host_client->old_name, host_client->name))
 	{
-		if (host_client->begun)
+		if (host_client->begun && host_client->netconnection)
 			SV_BroadcastPrintf("\003%s ^7changed name to ^3%s\n", host_client->old_name, host_client->name);
-		strlcpy(host_client->old_name, host_client->name, sizeof(host_client->old_name));
+		dp_strlcpy(host_client->old_name, host_client->name, sizeof(host_client->old_name));
 		// send notification to all clients
 		MSG_WriteByte (&sv.reliable_datagram, svc_updatename);
 		MSG_WriteByte (&sv.reliable_datagram, clientnum);
@@ -866,7 +902,7 @@ static void SV_Name_f(cmd_state_t *cmd)
 	else
 		newNameSource = Cmd_Args(cmd);
 
-	strlcpy(newName, newNameSource, sizeof(newName));
+	dp_strlcpy(newName, newNameSource, sizeof(newName));
 
 	if (cmd->source == src_local)
 		return;
@@ -880,7 +916,7 @@ static void SV_Name_f(cmd_state_t *cmd)
 	host_client->nametime = host.realtime + max(0.0f, sv_namechangetimer.value);
 
 	// point the string back at updateclient->name to keep it safe
-	strlcpy (host_client->name, newName, sizeof (host_client->name));
+	dp_strlcpy (host_client->name, newName, sizeof (host_client->name));
 
 	for (i = 0, j = 0;host_client->name[i];i++)
 		if (host_client->name[i] != '\r' && host_client->name[i] != '\n')
@@ -1117,9 +1153,9 @@ static void SV_MaxPlayers_f(cmd_state_t *cmd)
 
 	svs.maxclients_next = n;
 	if (n == 1)
-		Cvar_Set (&cvars_all, "deathmatch", "0");
+		Cvar_SetQuick(&deathmatch, "0");
 	else
-		Cvar_Set (&cvars_all, "deathmatch", "1");
+		Cvar_SetQuick(&deathmatch, "1");
 }
 
 /*
@@ -1138,9 +1174,9 @@ static void SV_Playermodel_f(cmd_state_t *cmd)
 		return;
 
 	if (Cmd_Argc (cmd) == 2)
-		strlcpy (newPath, Cmd_Argv(cmd, 1), sizeof (newPath));
+		dp_strlcpy (newPath, Cmd_Argv(cmd, 1), sizeof (newPath));
 	else
-		strlcpy (newPath, Cmd_Args(cmd), sizeof (newPath));
+		dp_strlcpy (newPath, Cmd_Args(cmd), sizeof (newPath));
 
 	for (i = 0, j = 0;newPath[i];i++)
 		if (newPath[i] != '\r' && newPath[i] != '\n')
@@ -1158,11 +1194,11 @@ static void SV_Playermodel_f(cmd_state_t *cmd)
 	*/
 
 	// point the string back at updateclient->name to keep it safe
-	strlcpy (host_client->playermodel, newPath, sizeof (host_client->playermodel));
+	dp_strlcpy (host_client->playermodel, newPath, sizeof (host_client->playermodel));
 	PRVM_serveredictstring(host_client->edict, playermodel) = PRVM_SetEngineString(prog, host_client->playermodel);
 	if (strcmp(host_client->old_model, host_client->playermodel))
 	{
-		strlcpy(host_client->old_model, host_client->playermodel, sizeof(host_client->old_model));
+		dp_strlcpy(host_client->old_model, host_client->playermodel, sizeof(host_client->old_model));
 		/*// send notification to all clients
 		MSG_WriteByte (&sv.reliable_datagram, svc_updatepmodel);
 		MSG_WriteByte (&sv.reliable_datagram, host_client - svs.clients);
@@ -1185,9 +1221,9 @@ static void SV_Playerskin_f(cmd_state_t *cmd)
 		return;
 
 	if (Cmd_Argc (cmd) == 2)
-		strlcpy (newPath, Cmd_Argv(cmd, 1), sizeof (newPath));
+		dp_strlcpy (newPath, Cmd_Argv(cmd, 1), sizeof (newPath));
 	else
-		strlcpy (newPath, Cmd_Args(cmd), sizeof (newPath));
+		dp_strlcpy (newPath, Cmd_Args(cmd), sizeof (newPath));
 
 	for (i = 0, j = 0;newPath[i];i++)
 		if (newPath[i] != '\r' && newPath[i] != '\n')
@@ -1205,13 +1241,13 @@ static void SV_Playerskin_f(cmd_state_t *cmd)
 	*/
 
 	// point the string back at updateclient->name to keep it safe
-	strlcpy (host_client->playerskin, newPath, sizeof (host_client->playerskin));
+	dp_strlcpy (host_client->playerskin, newPath, sizeof (host_client->playerskin));
 	PRVM_serveredictstring(host_client->edict, playerskin) = PRVM_SetEngineString(prog, host_client->playerskin);
 	if (strcmp(host_client->old_skin, host_client->playerskin))
 	{
 		//if (host_client->begun)
 		//	SV_BroadcastPrintf("%s changed skin to %s\n", host_client->name, host_client->playerskin);
-		strlcpy(host_client->old_skin, host_client->playerskin, sizeof(host_client->old_skin));
+		dp_strlcpy(host_client->old_skin, host_client->playerskin, sizeof(host_client->old_skin));
 		/*// send notification to all clients
 		MSG_WriteByte (&sv.reliable_datagram, svc_updatepskin);
 		MSG_WriteByte (&sv.reliable_datagram, host_client - svs.clients);
@@ -1415,8 +1451,11 @@ static void SV_Ent_Create_f(cmd_state_t *cmd)
 
 	void (*print)(const char *, ...) = (cmd->source == src_client ? SV_ClientPrintf : Con_Printf);
 
-	if(!Cmd_Argc(cmd))
+	if(Cmd_Argc(cmd) == 1)
+	{
+		print("Usage: ent_create <classname> [<key> <value> ... ]\n\nIf executing as a player, an entity of classname will spawn where you're aiming.\nOptional key-value pairs can be provided. If origin is provided, it will spawn the entity at that coordinate.\nHowever, an origin is required if the command is executed from a dedicated server console.\n");
 		return;
+	}
 
 	ed = PRVM_ED_Alloc(SVVM_prog);
 
@@ -1434,7 +1473,7 @@ static void SV_Ent_Create_f(cmd_state_t *cmd)
 
 		Matrix4x4_OriginFromMatrix(&view, org);
 		VectorSet(temp, 65536, 0, 0);
-		Matrix4x4_Transform(&view, temp, dest);		
+		Matrix4x4_Transform(&view, temp, dest);
 
 		trace = SV_TraceLine(org, dest, MOVE_NORMAL, NULL, SUPERCONTENTS_SOLID, 0, 0, collision_extendmovelength.value);
 
@@ -1445,10 +1484,7 @@ static void SV_Ent_Create_f(cmd_state_t *cmd)
 	}
 	// Or spawn at a specified origin.
 	else
-	{
-		print = Con_Printf;
 		haveorigin = false;
-	}
 
 	// Allow more than one key/value pair by cycling between expecting either one.
 	for(i = 2; i < Cmd_Argc(cmd); i += 2)
@@ -1613,15 +1649,15 @@ void SV_InitOperatorCommands(void)
 	Cmd_AddCommand(CF_SERVER | CF_SERVER_FROM_CLIENT, "status", SV_Status_f, "print server status information");
 	Cmd_AddCommand(CF_SHARED, "map", SV_Map_f, "kick everyone off the server and start a new level");
 	Cmd_AddCommand(CF_SHARED, "restart", SV_Restart_f, "restart current level");
-	Cmd_AddCommand(CF_SHARED, "changelevel", SV_Changelevel_f, "change to another level, bringing along all connected clients");
+	Cmd_AddCommand(CF_SHARED, "changelevel", SV_Changelevel_f, "change to another level, bringing along all connected clients (or start a new level if none is loaded)");
 	Cmd_AddCommand(CF_SHARED | CF_SERVER_FROM_CLIENT, "say", SV_Say_f, "send a chat message to everyone on the server");
 	Cmd_AddCommand(CF_SERVER_FROM_CLIENT, "say_team", SV_Say_Team_f, "send a chat message to your team on the server");
 	Cmd_AddCommand(CF_SHARED | CF_SERVER_FROM_CLIENT, "tell", SV_Tell_f, "send a chat message to only one person on the server");
 	Cmd_AddCommand(CF_SERVER | CF_SERVER_FROM_CLIENT, "pause", SV_Pause_f, "pause the game (if the server allows pausing)");
 	Cmd_AddCommand(CF_SHARED, "kick", SV_Kick_f, "kick a player off the server by number or name");
 	Cmd_AddCommand(CF_SHARED | CF_SERVER_FROM_CLIENT, "ping", SV_Ping_f, "print ping times of all players on the server");
-	Cmd_AddCommand(CF_SHARED, "load", SV_Loadgame_f, "load a saved game file");
-	Cmd_AddCommand(CF_SHARED, "save", SV_Savegame_f, "save the game to a file");
+	Cmd_AddCommand(CF_SERVER, "load", SV_Loadgame_f, "load a saved game file");
+	Cmd_AddCommand(CF_SERVER, "save", SV_Savegame_f, "save the game to a file");
 	Cmd_AddCommand(CF_SHARED, "viewmodel", SV_Viewmodel_f, "change model of viewthing entity in current level");
 	Cmd_AddCommand(CF_SHARED, "viewframe", SV_Viewframe_f, "change animation frame of viewthing entity in current level");
 	Cmd_AddCommand(CF_SHARED, "viewnext", SV_Viewnext_f, "change to next animation frame of viewthing entity in current level");

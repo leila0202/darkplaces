@@ -22,7 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "sv_demo.h"
 
 extern cvar_t sv_airaccel_qw_stretchfactor;
-extern cvar_t sv_gameplayfix_customstats;
+extern cvar_t sv_qcstats;
 extern cvar_t sv_warsowbunny_airforwardaccel;
 extern cvar_t sv_warsowbunny_accel;
 extern cvar_t sv_warsowbunny_topspeed;
@@ -577,7 +577,7 @@ static qbool SV_PrepareEntityForSending (prvm_edict_t *ent, entity_state_t *cs, 
 	if (f)
 		cs->effects |= ((unsigned int)f & 0xff) << 24;
 
-	if (PRVM_serveredictfloat(ent, movetype) == MOVETYPE_STEP)
+	if (PRVM_serveredictfloat(ent, movetype) == MOVETYPE_STEP || ((int)PRVM_serveredictfloat(ent, flags) & FL_MONSTER))
 		cs->flags |= RENDER_STEP;
 	if (cs->number != sv.writeentitiestoclient_cliententitynumber && (cs->effects & EF_LOWPRECISION) && cs->origin[0] >= -32768 && cs->origin[1] >= -32768 && cs->origin[2] >= -32768 && cs->origin[0] <= 32767 && cs->origin[1] <= 32767 && cs->origin[2] <= 32767)
 		cs->flags |= RENDER_LOWPRECISION;
@@ -920,7 +920,7 @@ void SV_MarkWriteEntityStateToClient(entity_state_t *s, client_t *client)
 			ed = PRVM_EDICT_NUM(s->number);
 
 			// if not touching a visible leaf
-			if (sv_cullentities_pvs.integer && !r_novis.integer && !r_trippy.integer && sv.writeentitiestoclient_pvsbytes)
+			if (sv_cullentities_pvs.integer && !r_novis.integer && !r_trippy.integer && sv.writeentitiestoclient_pvs)
 			{
 				if (ed->priv.server->pvs_numclusters < 0)
 				{
@@ -956,13 +956,12 @@ void SV_MarkWriteEntityStateToClient(entity_state_t *s, client_t *client)
 					s->specialvisibilityradius
 						? sv_cullentities_trace_samples_extra.integer
 						: sv_cullentities_trace_samples.integer;
-				float enlarge = sv_cullentities_trace_enlarge.value;
 
 				if(samples > 0)
 				{
 					int eyeindex;
 					for (eyeindex = 0;eyeindex < sv.writeentitiestoclient_numeyes;eyeindex++)
-						if(SV_CanSeeBox(samples, sv_cullentities_trace_eyejitter.value, enlarge, sv_cullentities_trace_expand.value, sv.writeentitiestoclient_eyes[eyeindex], ed->priv.server->cullmins, ed->priv.server->cullmaxs))
+						if(SV_CanSeeBox(samples, sv_cullentities_trace_eyejitter.value, sv_cullentities_trace_enlarge.value, sv_cullentities_trace_expand.value, sv.writeentitiestoclient_eyes[eyeindex], ed->priv.server->cullmins, ed->priv.server->cullmaxs))
 							break;
 					if(eyeindex < sv.writeentitiestoclient_numeyes)
 						svs.clients[sv.writeentitiestoclient_clientnumber].visibletime[s->number] =
@@ -971,7 +970,7 @@ void SV_MarkWriteEntityStateToClient(entity_state_t *s, client_t *client)
 									? sv_cullentities_trace_delay_players.value
 									: sv_cullentities_trace_delay.value
 							);
-					else if (host.realtime > svs.clients[sv.writeentitiestoclient_clientnumber].visibletime[s->number])
+					else if ((float)host.realtime > svs.clients[sv.writeentitiestoclient_clientnumber].visibletime[s->number])
 					{
 						sv.writeentitiestoclient_stats_culled_trace++;
 						return;
@@ -995,14 +994,11 @@ void SV_AddCameraEyes(void)
 	prvm_prog_t *prog = SVVM_prog;
 	int e, i, j, k;
 	prvm_edict_t *ed;
-	static int cameras[MAX_LEVELNETWORKEYES];
-	static vec3_t camera_origins[MAX_LEVELNETWORKEYES];
-	static int eye_levels[MAX_CLIENTNETWORKEYES];
+	int cameras[MAX_LEVELNETWORKEYES];
+	vec3_t camera_origins[MAX_LEVELNETWORKEYES];
+	int eye_levels[MAX_CLIENTNETWORKEYES] = {0};
 	int n_cameras = 0;
 	vec3_t mi, ma;
-
-	for(i = 0; i < sv.writeentitiestoclient_numeyes; ++i)
-		eye_levels[i] = 0;
 
 	// check line of sight to portal entities and add them to PVS
 	for (e = 1, ed = PRVM_NEXT_EDICT(prog->edicts);e < prog->num_edicts;e++, ed = PRVM_NEXT_EDICT(ed))
@@ -1045,7 +1041,12 @@ void SV_AddCameraEyes(void)
 		for(k = 0; k < sv.writeentitiestoclient_numeyes; ++k)
 		if(eye_levels[k] <= MAX_EYE_RECURSION)
 		{
-			if(SV_CanSeeBox(sv_cullentities_trace_samples.integer, sv_cullentities_trace_eyejitter.value, sv_cullentities_trace_enlarge.value, sv_cullentities_trace_expand.value, sv.writeentitiestoclient_eyes[k], mi, ma))
+			if(SV_CanSeeBox(sv_cullentities_trace_samples_extra.integer, sv_cullentities_trace_eyejitter.value, sv_cullentities_trace_enlarge.value, sv_cullentities_trace_expand.value, sv.writeentitiestoclient_eyes[k], mi, ma))
+				svs.clients[sv.writeentitiestoclient_clientnumber].visibletime[cameras[j]] = host.realtime + sv_cullentities_trace_delay.value;
+
+			// bones_was_here: this use of visibletime doesn't conflict because sv_cullentities_trace doesn't consider portal entities
+			// the explicit cast prevents float precision differences that cause the condition to fail
+			if ((float)host.realtime <= svs.clients[sv.writeentitiestoclient_clientnumber].visibletime[cameras[j]])
 			{
 				eye_levels[sv.writeentitiestoclient_numeyes] = eye_levels[k] + 1;
 				VectorCopy(camera_origins[j], sv.writeentitiestoclient_eyes[sv.writeentitiestoclient_numeyes]);
@@ -1144,7 +1145,9 @@ void SV_WriteClientdataToMessage (client_t *client, prvm_edict_t *ent, sizebuf_t
 	// the runes are in serverflags, pack them into the items value, also pack
 	// in the items2 value for mission pack huds
 	// (used only in the mission packs, which do not use serverflags)
-	items = (int)PRVM_serveredictfloat(ent, items) | ((int)PRVM_serveredictfloat(ent, items2) << 23) | ((int)PRVM_serverglobalfloat(serverflags) << 28);
+	items = (int)PRVM_serveredictfloat(ent, items)
+		| (((int)PRVM_serveredictfloat(ent, items2) & ((1<<9)-1)) << 23)
+		| (((int)PRVM_serverglobalfloat(serverflags) & ((1<<4)-1)) << 28);
 
 	VectorCopy(PRVM_serveredictvector(ent, punchvector), punchvector);
 
@@ -1153,7 +1156,7 @@ void SV_WriteClientdataToMessage (client_t *client, prvm_edict_t *ent, sizebuf_t
 	s = PRVM_GetString(prog, PRVM_serveredictstring(ent, weaponmodel));
 	if (strcmp(s, client->weaponmodel))
 	{
-		strlcpy(client->weaponmodel, s, sizeof(client->weaponmodel));
+		dp_strlcpy(client->weaponmodel, s, sizeof(client->weaponmodel));
 		client->weaponmodelindex = SV_ModelIndex(s, 1);
 	}
 
@@ -1204,7 +1207,7 @@ void SV_WriteClientdataToMessage (client_t *client, prvm_edict_t *ent, sizebuf_t
 	//stats[STAT_SECRETS] = PRVM_serverglobalfloat(found_secrets);
 	//stats[STAT_MONSTERS] = PRVM_serverglobalfloat(killed_monsters);
 
-	if(!sv_gameplayfix_customstats.integer)
+	if(!sv_qcstats.integer)
 	{
 		statsf[STAT_MOVEVARS_AIRACCEL_QW_STRETCHFACTOR] = sv_airaccel_qw_stretchfactor.value;
 		statsf[STAT_MOVEVARS_AIRCONTROL_PENALTY] = sv_aircontrol_penalty.value;
@@ -1613,7 +1616,7 @@ static void SV_UpdateToReliableMessages (void)
 		// always point the string back at host_client->name to keep it safe
 		//strlcpy (host_client->name, name, sizeof (host_client->name));
 		if (name != host_client->name) // prevent buffer overlap SIGABRT on Mac OSX
-			strlcpy (host_client->name, name, sizeof (host_client->name));
+			dp_strlcpy (host_client->name, name, sizeof (host_client->name));
 		SV_Name(i);
 
 		// DP_SV_CLIENTCOLORS
@@ -1634,7 +1637,7 @@ static void SV_UpdateToReliableMessages (void)
 		// always point the string back at host_client->name to keep it safe
 		//strlcpy (host_client->playermodel, model, sizeof (host_client->playermodel));
 		if (model != host_client->playermodel) // prevent buffer overlap SIGABRT on Mac OSX
-			strlcpy (host_client->playermodel, model, sizeof (host_client->playermodel));
+			dp_strlcpy (host_client->playermodel, model, sizeof (host_client->playermodel));
 		PRVM_serveredictstring(host_client->edict, playermodel) = PRVM_SetEngineString(prog, host_client->playermodel);
 
 		// NEXUIZ_PLAYERSKIN
@@ -1644,7 +1647,7 @@ static void SV_UpdateToReliableMessages (void)
 		// always point the string back at host_client->name to keep it safe
 		//strlcpy (host_client->playerskin, skin, sizeof (host_client->playerskin));
 		if (skin != host_client->playerskin) // prevent buffer overlap SIGABRT on Mac OSX
-			strlcpy (host_client->playerskin, skin, sizeof (host_client->playerskin));
+			dp_strlcpy (host_client->playerskin, skin, sizeof (host_client->playerskin));
 		PRVM_serveredictstring(host_client->edict, playerskin) = PRVM_SetEngineString(prog, host_client->playerskin);
 
 		// TODO: add an extension name for this [1/17/2008 Black]

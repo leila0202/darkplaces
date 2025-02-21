@@ -28,7 +28,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "cl_collision.h"
 
-cvar_t cl_name = {CF_CLIENT | CF_ARCHIVE | CF_USERINFO, "name", "player", "player name"};
+/// User-visible names of these CF_USERINFO cvars must be matched in CL_SetInfo()!
+cvar_t cl_name = {CF_CLIENT | CF_ARCHIVE | CF_USERINFO, "_cl_name", "player", "player name"};
 cvar_t cl_rate = {CF_CLIENT | CF_ARCHIVE | CF_USERINFO, "rate", "20000", "connection speed"};
 cvar_t cl_rate_burstsize = {CF_CLIENT | CF_ARCHIVE | CF_USERINFO, "rate_burstsize", "1024", "rate control burst size"};
 cvar_t cl_topcolor = {CF_CLIENT | CF_ARCHIVE | CF_USERINFO, "topcolor", "0", "color of your shirt"};
@@ -37,6 +38,7 @@ cvar_t cl_team = {CF_CLIENT | CF_USERINFO | CF_ARCHIVE, "team", "none", "QW team
 cvar_t cl_skin = {CF_CLIENT | CF_USERINFO | CF_ARCHIVE, "skin", "", "QW player skin name (example: base)"};
 cvar_t cl_noaim = {CF_CLIENT | CF_USERINFO | CF_ARCHIVE, "noaim", "1", "QW option to disable vertical autoaim"};
 cvar_t cl_pmodel = {CF_CLIENT | CF_USERINFO | CF_ARCHIVE, "pmodel", "0", "current player model number in nehahra"};
+
 cvar_t r_fixtrans_auto = {CF_CLIENT, "r_fixtrans_auto", "0", "automatically fixtrans textures (when set to 2, it also saves the fixed versions to a fixtrans directory)"};
 
 extern cvar_t rcon_secure;
@@ -113,40 +115,40 @@ void CL_ForwardToServer (const char *s)
 					if (cl.stats[STAT_ITEMS] & IT_QUAD)
 					{
 						if (temp[0])
-							strlcat(temp, " ", sizeof(temp));
-						strlcat(temp, "quad", sizeof(temp));
+							dp_strlcat(temp, " ", sizeof(temp));
+						dp_strlcat(temp, "quad", sizeof(temp));
 					}
 					if (cl.stats[STAT_ITEMS] & IT_INVULNERABILITY)
 					{
 						if (temp[0])
-							strlcat(temp, " ", sizeof(temp));
-						strlcat(temp, "pent", sizeof(temp));
+							dp_strlcat(temp, " ", sizeof(temp));
+						dp_strlcat(temp, "pent", sizeof(temp));
 					}
 					if (cl.stats[STAT_ITEMS] & IT_INVISIBILITY)
 					{
 						if (temp[0])
-							strlcat(temp, " ", sizeof(temp));
-						strlcat(temp, "eyes", sizeof(temp));
+							dp_strlcat(temp, " ", sizeof(temp));
+						dp_strlcat(temp, "eyes", sizeof(temp));
 					}
 					break;
 				case 'w': // weapon status (outputs "SSG:NG:SNG:GL:RL:LG" with the text between : characters omitted if you lack the weapon)
 					if (cl.stats[STAT_ITEMS] & IT_SUPER_SHOTGUN)
-						strlcat(temp, "SSG", sizeof(temp));
-					strlcat(temp, ":", sizeof(temp));
+						dp_strlcat(temp, "SSG", sizeof(temp));
+					dp_strlcat(temp, ":", sizeof(temp));
 					if (cl.stats[STAT_ITEMS] & IT_NAILGUN)
-						strlcat(temp, "NG", sizeof(temp));
-					strlcat(temp, ":", sizeof(temp));
+						dp_strlcat(temp, "NG", sizeof(temp));
+					dp_strlcat(temp, ":", sizeof(temp));
 					if (cl.stats[STAT_ITEMS] & IT_SUPER_NAILGUN)
-						strlcat(temp, "SNG", sizeof(temp));
-					strlcat(temp, ":", sizeof(temp));
+						dp_strlcat(temp, "SNG", sizeof(temp));
+					dp_strlcat(temp, ":", sizeof(temp));
 					if (cl.stats[STAT_ITEMS] & IT_GRENADE_LAUNCHER)
-						strlcat(temp, "GL", sizeof(temp));
-					strlcat(temp, ":", sizeof(temp));
+						dp_strlcat(temp, "GL", sizeof(temp));
+					dp_strlcat(temp, ":", sizeof(temp));
 					if (cl.stats[STAT_ITEMS] & IT_ROCKET_LAUNCHER)
-						strlcat(temp, "RL", sizeof(temp));
-					strlcat(temp, ":", sizeof(temp));
+						dp_strlcat(temp, "RL", sizeof(temp));
+					dp_strlcat(temp, ":", sizeof(temp));
 					if (cl.stats[STAT_ITEMS] & IT_LIGHTNING)
-						strlcat(temp, "LG", sizeof(temp));
+						dp_strlcat(temp, "LG", sizeof(temp));
 					break;
 				default:
 					// not a recognized macro, print it as-is...
@@ -214,6 +216,32 @@ static void CL_SendCvar_f(cmd_state_t *cmd)
 			CL_ForwardToServer(va(vabuf, sizeof(vabuf), "sentcvar %s \"%s\"", c->name, c->string));
 		return;
 	}
+}
+
+/*
+==================
+CL_Name_f
+
+The logic from div0-stable's Host_Name_f() is now in SV_Name_f().
+==================
+*/
+static void CL_Name_f(cmd_state_t *cmd)
+{
+	char *newNameSource;
+
+	if (Cmd_Argc(cmd) == 1)
+	{
+		Con_Printf("name: \"%s^7\"\n", cl_name.string);
+		return;
+	}
+
+	// in the single-arg case any enclosing quotes shall be stripped
+	newNameSource = (char *)(Cmd_Argc(cmd) == 2 ? Cmd_Argv(cmd, 1) : Cmd_Args(cmd));
+
+	if (strlen(newNameSource) >= MAX_SCOREBOARDNAME) // may as well truncate before networking
+		newNameSource[MAX_SCOREBOARDNAME - 1] = '\0'; // this is fine (cbuf stores length)
+
+	Cvar_SetQuick(&cl_name, newNameSource);
 }
 
 /*
@@ -566,7 +594,7 @@ static void CL_Rcon_f(cmd_state_t *cmd) // credit: taken from QuakeWorld
 			++cls.rcon_trying;
 			if(i >= MAX_RCONS)
 				NetConn_WriteString(mysocket, "\377\377\377\377getchallenge", &cls.rcon_address); // otherwise we'll request the challenge later
-			strlcpy(cls.rcon_commands[cls.rcon_ringpos], Cmd_Args(cmd), sizeof(cls.rcon_commands[cls.rcon_ringpos]));
+			dp_strlcpy(cls.rcon_commands[cls.rcon_ringpos], Cmd_Args(cmd), sizeof(cls.rcon_commands[cls.rcon_ringpos]));
 			cls.rcon_addresses[cls.rcon_ringpos] = cls.rcon_address;
 			cls.rcon_timeout[cls.rcon_ringpos] = host.realtime + rcon_secure_challengetimeout.value;
 			cls.rcon_ringpos = (cls.rcon_ringpos + 1) % MAX_RCONS;
@@ -580,7 +608,7 @@ static void CL_Rcon_f(cmd_state_t *cmd) // credit: taken from QuakeWorld
 			if(HMAC_MDFOUR_16BYTES((unsigned char *) (buf + 24), (unsigned char *) argbuf, (int)strlen(argbuf), (unsigned char *) rcon_password.string, n))
 			{
 				buf[40] = ' ';
-				strlcpy(buf + 41, argbuf, sizeof(buf) - 41);
+				dp_strlcpy(buf + 41, argbuf, sizeof(buf) - 41);
 				NetConn_Write(mysocket, buf, 41 + (int)strlen(buf + 41), &cls.rcon_address);
 			}
 		}
@@ -611,7 +639,7 @@ static void CL_FullServerinfo_f(cmd_state_t *cmd) // credit: taken from QuakeWor
 		return;
 	}
 
-	strlcpy (cl.qw_serverinfo, Cmd_Argv(cmd, 1), sizeof(cl.qw_serverinfo));
+	dp_strlcpy (cl.qw_serverinfo, Cmd_Argv(cmd, 1), sizeof(cl.qw_serverinfo));
 	InfoString_GetValue(cl.qw_serverinfo, "teamplay", temp, sizeof(temp));
 	cl.qw_teamplay = atoi(temp);
 }
@@ -645,7 +673,7 @@ static void CL_FullInfo_f(cmd_state_t *cmd) // credit: taken from QuakeWorld
 		if (len >= sizeof(key)) {
 			len = sizeof(key) - 1;
 		}
-		strlcpy(key, s, len + 1);
+		dp_strlcpy(key, s, len + 1);
 		s += len;
 		if (!*s)
 		{
@@ -658,7 +686,7 @@ static void CL_FullInfo_f(cmd_state_t *cmd) // credit: taken from QuakeWorld
 		if (len >= sizeof(value)) {
 			len = sizeof(value) - 1;
 		}
-		strlcpy(value, s, len + 1);
+		dp_strlcpy(value, s, len + 1);
 
 		CL_SetInfo(key, value, false, false, false, false);
 
@@ -715,8 +743,16 @@ void CL_InitCommands(void)
 {
 	dpsnprintf(cls.userinfo, sizeof(cls.userinfo), "\\name\\player\\team\\none\\topcolor\\0\\bottomcolor\\0\\rate\\10000\\msg\\1\\noaim\\1\\*ver\\dp");
 
+	/* In Quake `name` is a command that concatenates its arguments (quotes unnecessary)
+	 * which is expected in most DP-based games.
+	 * In QuakeWorld it's a cvar which requires quotes if spaces are used.
+	 */
 	Cvar_RegisterVariable(&cl_name);
-	Cvar_RegisterVirtual(&cl_name, "_cl_name");
+	if ((0)) // TODO: if (gamemode == GAME_QUAKEWORLD)
+		Cvar_RegisterVirtual(&cl_name, "name");
+	else
+		Cmd_AddCommand(CF_CLIENT, "name", CL_Name_f, "change your player name");
+
 	Cvar_RegisterVariable(&cl_rate);
 	Cvar_RegisterVirtual(&cl_rate, "_cl_rate");
 	Cvar_RegisterVariable(&cl_rate_burstsize);

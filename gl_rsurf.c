@@ -475,7 +475,7 @@ void R_View_WorldVisibility(qbool forcenovis)
 		viewleaf = model->brush.PointInLeaf ? model->brush.PointInLeaf(model, r_refdef.view.origin) : NULL;
 		// if possible fetch the visible cluster bits
 		if (!r_lockpvs.integer && model->brush.FatPVS)
-			model->brush.FatPVS(model, r_refdef.view.origin, 2, r_refdef.viewcache.world_pvsbits, (r_refdef.viewcache.world_numclusters+7)>>3, false);
+			model->brush.FatPVS(model, r_refdef.view.origin, 2, &r_refdef.viewcache.world_pvsbits, r_main_mempool, false);
 
 		// if floating around in the void (no pvs data available, and no
 		// portals available), simply use all on-screen leafs.
@@ -1295,7 +1295,10 @@ void R_Mod_CompileShadowMap(entity_render_t *ent, vec3_t relativelightorigin, ve
 	// exceeding the number of triangles in a single mesh) we have to make sure
 	// that we make only a single mesh - so over-estimate the size of the mesh
 	// to match the model.
-	r_shadow_compilingrtlight->static_meshchain_shadow_shadowmap = Mod_ShadowMesh_Begin(r_main_mempool, model->surfmesh.num_vertices, model->surfmesh.num_triangles);
+	// bones_was_here: +128 works around BUG https://github.com/DarkPlacesEngine/darkplaces/issues/119
+	// +64 was enough to start the map without triggering ASan, +96 was enough to also edit the light.
+	// See also: warning in Mod_ShadowMesh_AddMesh
+	r_shadow_compilingrtlight->static_meshchain_shadow_shadowmap = Mod_ShadowMesh_Begin(r_main_mempool, model->surfmesh.num_vertices, model->surfmesh.num_triangles + 128);
 	R_Shadow_PrepareShadowSides(model->surfmesh.num_triangles);
 	for (surfacelistindex = 0;surfacelistindex < numsurfaces;surfacelistindex++)
 	{

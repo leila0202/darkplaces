@@ -497,7 +497,7 @@ void _Mem_Free(void *data, const char *filename, int fileline)
 	_Mem_FreeBlock((memheader_t *)((unsigned char *) data - sizeof(memheader_t)), filename, fileline);
 }
 
-mempool_t *_Mem_AllocPool(const char *name, int flags, mempool_t *parent, const char *filename, int fileline)
+mempool_t *_Mem_AllocPool(const char *name, unsigned flags, mempool_t *parent, const char *filename, int fileline)
 {
 	mempool_t *pool;
 	if (developer_memorydebug.integer)
@@ -520,7 +520,7 @@ mempool_t *_Mem_AllocPool(const char *name, int flags, mempool_t *parent, const 
 	List_Create(&pool->chain);
 	pool->totalsize = 0;
 	pool->realsize = sizeof(mempool_t);
-	strlcpy (pool->name, name, sizeof (pool->name));
+	dp_strlcpy (pool->name, name, sizeof (pool->name));
 	pool->parent = parent;
 	pool->next = poolchain;
 	poolchain = pool;
@@ -649,7 +649,7 @@ void _Mem_CheckSentinelsGlobal(const char *filename, int fileline)
 #endif
 }
 
-qbool Mem_IsAllocated(mempool_t *pool, void *data)
+qbool Mem_IsAllocated(mempool_t *pool, const void *data)
 {
 	memheader_t *header;
 	memheader_t *target;
@@ -813,7 +813,7 @@ void Mem_PrintStats(void)
 	{
 		if ((pool->flags & POOLFLAG_TEMP) && !List_Is_Empty(&pool->chain))
 		{
-			Con_Printf("Memory pool %p has sprung a leak totalling %lu bytes (%.3fMB)!  Listing contents...\n", (void *)pool, (unsigned long)pool->totalsize, pool->totalsize / 1048576.0);
+			Con_Printf(CON_WARN "Memory pool %p has sprung a leak totalling %lu bytes (%.3fMB)!  Listing contents...\n", (void *)pool, (unsigned long)pool->totalsize, pool->totalsize / 1048576.0);
 			List_For_Each_Entry(mem, &pool->chain, memheader_t, list)
 				Con_Printf("%10lu bytes allocated at %s:%i\n", (unsigned long)mem->size, mem->filename, mem->fileline);
 		}
@@ -862,15 +862,15 @@ static void MemStats_f(cmd_state_t *cmd)
 }
 
 
-char* _Mem_strdup (mempool_t *pool, const char* s, const char *filename, int fileline)
+char *_Mem_strdup(mempool_t *pool, const char *s, const char *filename, int fileline)
 {
 	char* p;
 	size_t sz;
 	if (s == NULL)
 		return NULL;
 	sz = strlen (s) + 1;
-	p = (char*)_Mem_Alloc (pool, NULL, sz, 16, filename, fileline);
-	strlcpy (p, s, sz);
+	p = (char*)_Mem_Alloc (pool, NULL, sz, alignof(char), filename, fileline);
+	dp_strlcpy (p, s, sz);
 	return p;
 }
 

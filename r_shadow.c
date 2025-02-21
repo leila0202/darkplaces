@@ -232,7 +232,7 @@ cvar_t r_shadow_bouncegrid_subsamples = {CF_CLIENT | CF_ARCHIVE, "r_shadow_bounc
 cvar_t r_shadow_bouncegrid_threaded = {CF_CLIENT | CF_ARCHIVE, "r_shadow_bouncegrid_threaded", "1", "enables use of taskqueue_maxthreads to perform the traces and slice rendering of bouncegrid"};
 cvar_t r_coronas = {CF_CLIENT | CF_ARCHIVE, "r_coronas", "0", "brightness of corona flare effects around certain lights, 0 disables corona effects"};
 cvar_t r_coronas_occlusionsizescale = {CF_CLIENT | CF_ARCHIVE, "r_coronas_occlusionsizescale", "0.1", "size of light source for corona occlusion checksum the proportion of hidden pixels controls corona intensity"};
-cvar_t r_coronas_occlusionquery = {CF_CLIENT | CF_ARCHIVE, "r_coronas_occlusionquery", "0", "fades coronas according to visibility"};
+cvar_t r_coronas_occlusionquery = {CF_CLIENT | CF_ARCHIVE, "r_coronas_occlusionquery", "0", "fades coronas according to visibility, requires OpenGL 4.4"};
 cvar_t gl_flashblend = {CF_CLIENT | CF_ARCHIVE, "gl_flashblend", "0", "render bright coronas for dynamic lights instead of actual lighting, fast but ugly"};
 cvar_t r_editlights = {CF_CLIENT, "r_editlights", "0", "enables .rtlights file editing mode"};
 cvar_t r_editlights_cursordistance = {CF_CLIENT, "r_editlights_cursordistance", "1024", "maximum distance of cursor from eye"};
@@ -1226,7 +1226,7 @@ static unsigned int R_Shadow_MakeTextures_SamplePoint(float x, float y, float z)
 	float dist = sqrt(x*x+y*y+z*z);
 	float intensity = dist < 1 ? ((1.0f - dist) * r_shadow_lightattenuationlinearscale.value / (r_shadow_lightattenuationdividebias.value + dist*dist)) : 0;
 	// note this code could suffer byte order issues except that it is multiplying by an integer that reads the same both ways
-	return (unsigned char)bound(0, intensity * 256.0f, 255) * 0x01010101;
+	return bound(0, (unsigned int)(intensity * 256.0f), 255) * 0x01010101U;
 }
 
 static void R_Shadow_MakeTextures(void)
@@ -1409,7 +1409,7 @@ void R_Shadow_RenderMode_ActiveLight(const rtlight_t *rtlight)
 void R_Shadow_RenderMode_Reset(void)
 {
 	R_Mesh_ResetTextureState();
-	R_Mesh_SetRenderTargets(r_shadow_viewfbo, r_shadow_viewdepthtexture, r_shadow_viewcolortexture, NULL, NULL, NULL);
+	R_Mesh_SetRenderTargets(r_shadow_viewfbo);
 	R_SetViewport(&r_refdef.view.viewport);
 	GL_Scissor(r_shadow_lightscissor[0], r_shadow_lightscissor[1], r_shadow_lightscissor[2], r_shadow_lightscissor[3]);
 	GL_DepthRange(0, 1);
@@ -1494,9 +1494,9 @@ void R_Shadow_ClearShadowMapTexture(void)
 	R_Mesh_ResetTextureState();
 	R_Shadow_RenderMode_Reset();
 	if (r_shadow_shadowmap2ddepthbuffer)
-		R_Mesh_SetRenderTargets(r_shadow_fbo2d, r_shadow_shadowmap2ddepthbuffer, r_shadow_shadowmap2ddepthtexture, NULL, NULL, NULL);
+		R_Mesh_SetRenderTargets(r_shadow_fbo2d);
 	else
-		R_Mesh_SetRenderTargets(r_shadow_fbo2d, r_shadow_shadowmap2ddepthtexture, NULL, NULL, NULL, NULL);
+		R_Mesh_SetRenderTargets(r_shadow_fbo2d);
 	R_SetupShader_DepthOrShadow(true, r_shadow_shadowmap2ddepthbuffer != NULL, false); // FIXME test if we have a skeletal model?
 	GL_PolygonOffset(r_shadow_shadowmapping_polygonfactor.value, r_shadow_shadowmapping_polygonoffset.value);
 	GL_DepthMask(true);
@@ -1559,9 +1559,9 @@ static void R_Shadow_RenderMode_ShadowMap(int side, int size, int x, int y)
 		R_Mesh_ResetTextureState();
 		R_Shadow_RenderMode_Reset();
 		if (r_shadow_shadowmap2ddepthbuffer)
-			R_Mesh_SetRenderTargets(r_shadow_fbo2d, r_shadow_shadowmap2ddepthbuffer, r_shadow_shadowmap2ddepthtexture, NULL, NULL, NULL);
+			R_Mesh_SetRenderTargets(r_shadow_fbo2d);
 		else
-			R_Mesh_SetRenderTargets(r_shadow_fbo2d, r_shadow_shadowmap2ddepthtexture, NULL, NULL, NULL, NULL);
+			R_Mesh_SetRenderTargets(r_shadow_fbo2d);
 		R_SetupShader_DepthOrShadow(true, r_shadow_shadowmap2ddepthbuffer != NULL, false); // FIXME test if we have a skeletal model?
 		GL_PolygonOffset(r_shadow_shadowmapping_polygonfactor.value, r_shadow_shadowmapping_polygonoffset.value);
 		GL_DepthMask(true);
@@ -1650,9 +1650,9 @@ void R_Shadow_RenderMode_DrawDeferredLight(qbool shadowmapping)
 	R_EntityMatrix(&identitymatrix);
 	GL_BlendFunc(GL_SRC_ALPHA, GL_ONE);
 	if (rsurface.rtlight->specularscale > 0 && r_shadow_gloss.integer > 0)
-		R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, r_shadow_prepasslightingspeculartexture, NULL, NULL);
+		R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo);
 	else
-		R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusefbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, NULL, NULL, NULL);
+		R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusefbo);
 
 	r_shadow_usingshadowmap2d = shadowmapping;
 
@@ -2959,7 +2959,7 @@ void R_Shadow_RenderLighting(int texturenumsurfaces, const msurface_t **textures
 		VectorNegate(specularcolor, specularcolor);
 		GL_BlendEquationSubtract(true);
 	}
-	RSurf_SetupDepthAndCulling();
+	RSurf_SetupDepthAndCulling(false);
 	switch (r_shadow_rendermode)
 	{
 	case R_SHADOW_RENDERMODE_VISIBLELIGHTING:
@@ -2996,7 +2996,7 @@ void R_RTLight_Update(rtlight_t *rtlight, int isstatic, matrix4x4_t *matrix, vec
 	VectorCopy(color, rtlight->color);
 	rtlight->cubemapname[0] = 0;
 	if (cubemapname && cubemapname[0])
-		strlcpy(rtlight->cubemapname, cubemapname, sizeof(rtlight->cubemapname));
+		dp_strlcpy(rtlight->cubemapname, cubemapname, sizeof(rtlight->cubemapname));
 	rtlight->shadow = shadow;
 	rtlight->corona = corona;
 	rtlight->style = style;
@@ -3735,10 +3735,6 @@ static void R_Shadow_DrawLightShadowMaps(rtlight_t *rtlight)
 	if (R_Shadow_ScissorForBBox(rtlight->cached_cullmins, rtlight->cached_cullmaxs))
 		return;
 
-	// don't let sound skip if going slow
-	if (r_refdef.scene.extraupdate)
-		S_ExtraUpdate();
-
 	numlightentities = rtlight->cached_numlightentities;
 	numlightentities_noselfshadow = rtlight->cached_numlightentities_noselfshadow;
 	numshadowentities = rtlight->cached_numshadowentities;
@@ -3859,10 +3855,6 @@ static void R_Shadow_DrawLight(rtlight_t *rtlight)
 	if (R_Shadow_ScissorForBBox(rtlight->cached_cullmins, rtlight->cached_cullmaxs))
 		return;
 
-	// don't let sound skip if going slow
-	if (r_refdef.scene.extraupdate)
-		S_ExtraUpdate();
-
 	numlightentities = rtlight->cached_numlightentities;
 	numlightentities_noselfshadow = rtlight->cached_numlightentities_noselfshadow;
 	numsurfaces = rtlight->cached_numsurfaces;
@@ -3976,7 +3968,7 @@ void R_Shadow_DrawPrepass(void)
 	GL_BlendFunc(GL_ONE, GL_ZERO);
 	GL_Color(1,1,1,1);
 	GL_DepthTest(true);
-	R_Mesh_SetRenderTargets(r_shadow_prepassgeometryfbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepassgeometrynormalmaptexture, NULL, NULL, NULL);
+	R_Mesh_SetRenderTargets(r_shadow_prepassgeometryfbo);
 	Vector4Set(clearcolor, 0.5f,0.5f,0.5f,1.0f);
 	GL_Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, clearcolor, 1.0f, 0);
 	if (r_timereport_active)
@@ -4003,7 +3995,7 @@ void R_Shadow_DrawPrepass(void)
 	GL_ColorMask(1,1,1,1);
 	GL_Color(1,1,1,1);
 	GL_DepthTest(true);
-	R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, r_shadow_prepasslightingspeculartexture, NULL, NULL);
+	R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo);
 	Vector4Set(clearcolor, 0, 0, 0, 0);
 	GL_Clear(GL_COLOR_BUFFER_BIT, clearcolor, 1.0f, 0);
 	if (r_timereport_active)
@@ -4090,19 +4082,19 @@ void R_Shadow_PrepareLights(void)
 
 			// set up the geometry pass fbo (depth + normalmap)
 			r_shadow_prepassgeometryfbo = R_Mesh_CreateFramebufferObject(r_shadow_prepassgeometrydepthbuffer, r_shadow_prepassgeometrynormalmaptexture, NULL, NULL, NULL);
-			R_Mesh_SetRenderTargets(r_shadow_prepassgeometryfbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepassgeometrynormalmaptexture, NULL, NULL, NULL);
+			R_Mesh_SetRenderTargets(r_shadow_prepassgeometryfbo);
 			// render depth into a renderbuffer and other important properties into the normalmap texture
 
 			// set up the lighting pass fbo (diffuse + specular)
 			r_shadow_prepasslightingdiffusespecularfbo = R_Mesh_CreateFramebufferObject(r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, r_shadow_prepasslightingspeculartexture, NULL, NULL);
-			R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, r_shadow_prepasslightingspeculartexture, NULL, NULL);
+			R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusespecularfbo);
 			// render diffuse into one texture and specular into another,
 			// with depth and normalmap bound as textures,
 			// with depth bound as attachment as well
 
 			// set up the lighting pass fbo (diffuse)
 			r_shadow_prepasslightingdiffusefbo = R_Mesh_CreateFramebufferObject(r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, NULL, NULL, NULL);
-			R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusefbo, r_shadow_prepassgeometrydepthbuffer, r_shadow_prepasslightingdiffusetexture, NULL, NULL, NULL);
+			R_Mesh_SetRenderTargets(r_shadow_prepasslightingdiffusefbo);
 			// render diffuse into one texture,
 			// with depth and normalmap bound as textures,
 			// with depth bound as attachment as well
@@ -4219,12 +4211,7 @@ void R_Shadow_DrawShadowMaps(void)
 
 	// render model shadowmaps (r_shadows 2) if desired which will be sampled in the forward pass
 	if (r_shadow_shadowmapatlas_modelshadows_size)
-	{
 		R_Shadow_DrawModelShadowMaps();
-		// don't let sound skip if going slow
-		if (r_refdef.scene.extraupdate)
-			S_ExtraUpdate();
-	}
 
 	if (R_Shadow_ShadowMappingEnabled())
 	{
@@ -4561,7 +4548,8 @@ void R_Shadow_DrawCoronas(void)
 	{
 	case RENDERPATH_GL32:
 	case RENDERPATH_GLES2:
-		usequery = r_coronas_occlusionquery.integer;
+		// buffer binding target GL_QUERY_BUFFER: Core since version 4.4
+		usequery = r_coronas_occlusionquery.integer && vid.support.glversion >= 44;
 #ifndef USE_GLES2
 		if (usequery)
 		{
@@ -4675,7 +4663,7 @@ static void R_Shadow_UpdateWorldLight(dlight_t *light, vec3_t origin, vec3_t ang
 	light->style = style;
 	light->shadow = shadowenable;
 	light->corona = corona;
-	strlcpy(light->cubemapname, cubemapname, sizeof(light->cubemapname));
+	dp_strlcpy(light->cubemapname, cubemapname, sizeof(light->cubemapname));
 	light->coronasizescale = coronasizescale;
 	light->ambientscale = ambientscale;
 	light->diffusescale = diffusescale;
@@ -5099,14 +5087,14 @@ void R_Shadow_LoadWorldLightsFromMap_LightArghliteTyrlite(void)
 			if (com_token[0] == '}')
 				break; // end of entity
 			if (com_token[0] == '_')
-				strlcpy(key, com_token + 1, sizeof(key));
+				dp_strlcpy(key, com_token + 1, sizeof(key));
 			else
-				strlcpy(key, com_token, sizeof(key));
+				dp_strlcpy(key, com_token, sizeof(key));
 			while (key[strlen(key)-1] == ' ') // remove trailing spaces
 				key[strlen(key)-1] = 0;
 			if (!COM_ParseToken_Simple(&data, false, false, true))
 				break; // error
-			strlcpy(value, com_token, sizeof(value));
+			dp_strlcpy(value, com_token, sizeof(value));
 
 			// now that we have the key pair worked out...
 			if (!strcmp("light", key))
@@ -5318,7 +5306,7 @@ void R_Shadow_EditLights_Reload_f(cmd_state_t *cmd)
 {
 	if (!cl.worldmodel)
 		return;
-	strlcpy(r_shadow_mapname, cl.worldname, sizeof(r_shadow_mapname));
+	dp_strlcpy(r_shadow_mapname, cl.worldname, sizeof(r_shadow_mapname));
 	R_Shadow_ClearWorldLights();
 	if (r_shadow_realtime_world_importlightentitiesfrommap.integer <= 1)
 	{
@@ -5391,7 +5379,7 @@ static void R_Shadow_EditLights_Edit_f(cmd_state_t *cmd)
 	radius = r_shadow_selectedlight->radius;
 	style = r_shadow_selectedlight->style;
 	if (*r_shadow_selectedlight->cubemapname)
-		strlcpy(cubemapname, r_shadow_selectedlight->cubemapname, sizeof(cubemapname));
+		dp_strlcpy(cubemapname, r_shadow_selectedlight->cubemapname, sizeof(cubemapname));
 	else
 		cubemapname[0] = 0;
 	shadows = r_shadow_selectedlight->shadow;
@@ -5595,7 +5583,7 @@ static void R_Shadow_EditLights_Edit_f(cmd_state_t *cmd)
 			return;
 		}
 		if (Cmd_Argc(cmd) == 3)
-			strlcpy(cubemapname, Cmd_Argv(cmd, 2), sizeof(cubemapname));
+			dp_strlcpy(cubemapname, Cmd_Argv(cmd, 2), sizeof(cubemapname));
 		else
 			cubemapname[0] = 0;
 	}
@@ -5926,7 +5914,7 @@ static void R_Shadow_EditLights_CopyInfo_f(cmd_state_t *cmd)
 	r_shadow_bufferlight.radius = r_shadow_selectedlight->radius;
 	r_shadow_bufferlight.style = r_shadow_selectedlight->style;
 	if (*r_shadow_selectedlight->cubemapname)
-		strlcpy(r_shadow_bufferlight.cubemapname, r_shadow_selectedlight->cubemapname, sizeof(r_shadow_bufferlight.cubemapname));
+		dp_strlcpy(r_shadow_bufferlight.cubemapname, r_shadow_selectedlight->cubemapname, sizeof(r_shadow_bufferlight.cubemapname));
 	else
 		r_shadow_bufferlight.cubemapname[0] = 0;
 	r_shadow_bufferlight.shadow = r_shadow_selectedlight->shadow;

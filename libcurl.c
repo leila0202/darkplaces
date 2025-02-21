@@ -7,15 +7,17 @@
 #include "jpeg.h"
 #include "image_png.h"
 
-static cvar_t cl_curl_maxdownloads = {CF_CLIENT | CF_ARCHIVE, "cl_curl_maxdownloads","1", "maximum number of concurrent HTTP/FTP downloads"};
-static cvar_t cl_curl_maxspeed = {CF_CLIENT | CF_ARCHIVE, "cl_curl_maxspeed","300", "maximum download speed (KiB/s)"};
-static cvar_t sv_curl_defaulturl = {CF_SERVER | CF_ARCHIVE, "sv_curl_defaulturl","", "default autodownload source URL"};
-static cvar_t sv_curl_serverpackages = {CF_SERVER | CF_ARCHIVE, "sv_curl_serverpackages","", "list of required files for the clients, separated by spaces"};
-static cvar_t sv_curl_maxspeed = {CF_SERVER | CF_ARCHIVE, "sv_curl_maxspeed","0", "maximum download speed for clients downloading from sv_curl_defaulturl (KiB/s)"};
-static cvar_t cl_curl_enabled = {CF_CLIENT | CF_ARCHIVE, "cl_curl_enabled","1", "whether client's download support is enabled"};
-static cvar_t cl_curl_useragent = {CF_CLIENT, "cl_curl_useragent","1", "send the User-Agent string (note: turning this off may break stuff)"};
-static cvar_t cl_curl_useragent_append = {CF_CLIENT, "cl_curl_useragent_append","", "a string to append to the User-Agent string (useful for name and version number of your mod)"};
-static cvar_t developer_curl = {CF_CLIENT | CF_SERVER, "developer_curl","0", "whether verbose curl output should be printed to stderr"};
+static cvar_t curl_enabled = {CF_SHARED | CF_ARCHIVE, "curl_enabled","1", "whether libcurl may be used to GET files or POST data"};
+static cvar_t curl_maxdownloads = {CF_SHARED | CF_ARCHIVE, "curl_maxdownloads","3", "maximum number of concurrent HTTP/FTP downloads"};
+static cvar_t curl_maxspeed = {CF_SHARED | CF_ARCHIVE, "curl_maxspeed","0", "maximum download speed (KiB/s)"};
+static cvar_t curl_useragent = {CF_SHARED, "curl_useragent","1", "send the User-Agent string (note: turning this off may break stuff)"};
+static cvar_t curl_useragent_append = {CF_SHARED, "curl_useragent_append","", "a string to append to the User-Agent string (useful for name and version number of your mod)"};
+
+static cvar_t sv_curl_defaulturl = {CF_SERVER, "sv_curl_defaulturl","", "default autodownload source URL"};
+static cvar_t sv_curl_serverpackages = {CF_SERVER, "sv_curl_serverpackages","", "list of required files for the clients, separated by spaces"};
+static cvar_t sv_curl_maxspeed = {CF_SERVER, "sv_curl_maxspeed","0", "maximum download speed for clients downloading from sv_curl_defaulturl (KiB/s)"};
+
+static cvar_t developer_curl = {CF_SHARED, "developer_curl","0", "whether verbose libcurl output should be printed to stderr"};
 
 /*
 =================================================================
@@ -158,6 +160,7 @@ static const char * (*qcurl_easy_strerror) (CURLcode);
 
 static CURLM * (*qcurl_multi_init) (void);
 static CURLMcode (*qcurl_multi_perform) (CURLM *multi_handle, int *running_handles);
+static CURLMcode (*qcurl_multi_wait) (CURLM *multi_handle, void*, unsigned int extra_nfds, int timeout_ms, int *ret);
 static CURLMcode (*qcurl_multi_add_handle) (CURLM *multi_handle, CURL *easy_handle);
 static CURLMcode (*qcurl_multi_remove_handle) (CURLM *multi_handle, CURL *easy_handle);
 static CURLMsg * (*qcurl_multi_info_read) (CURLM *multi_handle, int *msgs_in_queue);
@@ -177,6 +180,7 @@ static dllfunction_t curlfuncs[] =
 	{"curl_easy_getinfo",		(void **) &qcurl_easy_getinfo},
 	{"curl_multi_init",			(void **) &qcurl_multi_init},
 	{"curl_multi_perform",		(void **) &qcurl_multi_perform},
+	{"curl_multi_wait",		(void **) &qcurl_multi_wait},
 	{"curl_multi_add_handle",	(void **) &qcurl_multi_add_handle},
 	{"curl_multi_remove_handle",(void **) &qcurl_multi_remove_handle},
 	{"curl_multi_info_read",	(void **) &qcurl_multi_info_read},
@@ -252,7 +256,7 @@ static void Curl_CommandWhenDone(const char *cmd)
 	if(!curl_dll)
 		return;
 	if(cmd)
-		strlcpy(command_when_done, cmd, sizeof(command_when_done));
+		dp_strlcpy(command_when_done, cmd, sizeof(command_when_done));
 	else
 		*command_when_done = 0;
 }
@@ -268,7 +272,7 @@ static void Curl_CommandWhenError(const char *cmd)
 	if(!curl_dll)
 		return;
 	if(cmd)
-		strlcpy(command_when_error, cmd, sizeof(command_when_error));
+		dp_strlcpy(command_when_error, cmd, sizeof(command_when_error));
 	else
 		*command_when_error = 0;
 }
@@ -432,6 +436,8 @@ static size_t CURL_fwrite(void *data, size_t size, size_t nmemb, void *vdi)
 
 	di->bytes_received += bytes;
 
+	//Con_Printf("CURL_fwrite callback timestamp: %f bytes: %ld\n", host.realtime, ret);
+
 	return ret;
 	// Why not ret / nmemb?
 	// Because CURLOPT_WRITEFUNCTION docs say to return the number of bytes.
@@ -547,7 +553,7 @@ static void Curl_EndDownload(downloadinfo *di, CurlStatus status, CURLcode error
 			break;
 	}
 	if(content_type_)
-		strlcpy(content_type, content_type_, sizeof(content_type));
+		dp_strlcpy(content_type, content_type_, sizeof(content_type));
 	else
 		*content_type = 0;
 
@@ -583,7 +589,7 @@ static void Curl_EndDownload(downloadinfo *di, CurlStatus status, CURLcode error
 
 	if(ok && di->loadtype == LOADTYPE_PAK)
 	{
-		ok = FS_AddPack(di->filename, NULL, true);
+		ok = FS_AddPack(di->filename, NULL, true, true);
 		if(!ok)
 			CLEAR_AND_RETRY();
 	}
@@ -681,7 +687,7 @@ static void CheckPendingDownloads(void)
 	char vabuf[1024];
 	if(!curl_dll)
 		return;
-	if(numdownloads < cl_curl_maxdownloads.integer)
+	if(numdownloads < curl_maxdownloads.integer)
 	{
 		downloadinfo *di;
 		List_For_Each_Entry(di, &downloads, downloadinfo, list)
@@ -715,7 +721,7 @@ static void CheckPendingDownloads(void)
 				di->curle = qcurl_easy_init();
 				di->slist = NULL;
 				qcurl_easy_setopt(di->curle, CURLOPT_URL, di->url);
-				if(cl_curl_useragent.integer)
+				if(curl_useragent.integer)
 				{
 					const char *ua
 #ifdef HTTP_USER_AGENT
@@ -725,13 +731,13 @@ static void CheckPendingDownloads(void)
 #endif
 					if(!ua)
 						ua = "";
-					if(*cl_curl_useragent_append.string)
+					if(*curl_useragent_append.string)
 						ua = va(vabuf, sizeof(vabuf), "%s%s%s",
 							ua,
 							(ua[0] && ua[strlen(ua)-1] != ' ')
 								? " "
 								: "",
-							cl_curl_useragent_append.string);
+							curl_useragent_append.string);
 					qcurl_easy_setopt(di->curle, CURLOPT_USERAGENT, ua);
 				}
 				else
@@ -786,7 +792,7 @@ static void CheckPendingDownloads(void)
 				qcurl_multi_add_handle(curlm, di->curle);
 				di->started = true;
 				++numdownloads;
-				if(numdownloads >= cl_curl_maxdownloads.integer)
+				if(numdownloads >= curl_maxdownloads.integer)
 					break;
 			}
 		}
@@ -828,6 +834,12 @@ void Curl_Shutdown(void)
 	if (curl_mutex) Thread_DestroyMutex(curl_mutex);
 	CURL_CloseLibrary();
 	curl_dll = NULL;
+}
+
+// for VM_checkextension()
+qbool Curl_Available(void)
+{
+	return curl_dll ? true : false;
 }
 
 /*
@@ -877,7 +889,7 @@ static qbool Curl_Begin(const char *URL, const char *extraheaders, double maxspe
 		if(loadtype != LOADTYPE_NONE)
 			Host_Error("Curl_Begin: loadtype and buffer are both set");
 
-	if(!curl_dll || !cl_curl_enabled.integer)
+	if(!curl_dll || !curl_enabled.integer)
 	{
 		return false;
 	}
@@ -986,7 +998,7 @@ static qbool Curl_Begin(const char *URL, const char *extraheaders, double maxspe
 				if(loadtype == LOADTYPE_PAK)
 				{
 					qbool already_loaded;
-					if(FS_AddPack(fn, &already_loaded, true))
+					if(FS_AddPack(fn, &already_loaded, true, true))
 					{
 						Con_DPrintf("%s already exists, not downloading!\n", fn);
 						if(already_loaded)
@@ -1049,8 +1061,8 @@ static qbool Curl_Begin(const char *URL, const char *extraheaders, double maxspe
 		if(forthismap)
 			++numdownloads_added;
 		di = (downloadinfo *) Z_Malloc(sizeof(*di));
-		strlcpy(di->filename, name, sizeof(di->filename));
-		strlcpy(di->url, URL, sizeof(di->url));
+		dp_strlcpy(di->filename, name, sizeof(di->filename));
+		dp_strlcpy(di->url, URL, sizeof(di->url));
 		dpsnprintf(di->referer, sizeof(di->referer), "dp://%s/", cls.netcon ? cls.netcon->address : "notconnected.invalid");
 		di->forthismap = forthismap;
 		di->stream = NULL;
@@ -1126,7 +1138,7 @@ void Curl_Frame(void)
 
 	noclear = false;
 
-	if(!cl_curl_enabled.integer)
+	if(!curl_enabled.integer && cls.state != ca_dedicated)
 		return;
 
 	if(!curl_dll)
@@ -1216,7 +1228,7 @@ void Curl_Frame(void)
 
 	// use the slowest allowing download to derive the maxspeed... this CAN
 	// be done better, but maybe later
-	maxspeed = cl_curl_maxspeed.value;
+	maxspeed = curl_maxspeed.value;
 	List_For_Each_Entry(di, &downloads, downloadinfo, list)
 		if(di->maxspeed > 0)
 			if(di->maxspeed < maxspeed || maxspeed <= 0)
@@ -1233,6 +1245,33 @@ void Curl_Frame(void)
 		curltime = host.realtime;
 
 	if (curl_mutex) Thread_UnlockMutex(curl_mutex);
+}
+
+/*
+====================
+Curl_Select
+
+Sleeps until there's some transfer progress or a timeout is reached,
+unfortunately the timeout is only in milliseconds.
+This allows good throughput even at very low FPS.
+Less important on newer libcurl versions but still helps.
+
+Returns 0 immediately if there's no transfers to wait for,
+or > 0 if a transfer is ready or the timeout was reached.
+====================
+*/
+bool Curl_Select(int timeout_ms)
+{
+	CURLMcode err;
+
+	if (List_Is_Empty(&downloads))
+		return false;
+
+	err = qcurl_multi_wait(curlm, NULL, 0, timeout_ms, NULL);
+	if (err == CURLM_OK)
+		return true;
+	Con_Printf(CON_ERROR "curl_multi_wait() failed with code %d\n", err);
+	return false;
 }
 
 /*
@@ -1398,7 +1437,7 @@ static void Curl_Curl_f(cmd_state_t *cmd)
 		return;
 	}
 
-	if(!cl_curl_enabled.integer)
+	if(!curl_enabled.integer)
 	{
 		Con_Print("curl support not enabled. Set cl_curl_enabled to 1 to enable.\n");
 		return;
@@ -1538,15 +1577,23 @@ loads the commands and cvars this library uses
 */
 void Curl_Init_Commands(void)
 {
-	Cvar_RegisterVariable (&cl_curl_enabled);
-	Cvar_RegisterVariable (&cl_curl_maxdownloads);
-	Cvar_RegisterVariable (&cl_curl_maxspeed);
+	Cvar_RegisterVariable (&curl_enabled);
+	Cvar_RegisterVariable (&curl_maxdownloads);
+	Cvar_RegisterVariable (&curl_maxspeed);
+	Cvar_RegisterVariable (&curl_useragent);
+	Cvar_RegisterVariable (&curl_useragent_append);
+	Cvar_RegisterVirtual  (&curl_enabled,          "cl_curl_enabled");
+	Cvar_RegisterVirtual  (&curl_maxdownloads,     "cl_curl_maxdownloads");
+	Cvar_RegisterVirtual  (&curl_maxspeed,         "cl_curl_maxspeed");
+	Cvar_RegisterVirtual  (&curl_useragent,        "cl_curl_useragent");
+	Cvar_RegisterVirtual  (&curl_useragent_append, "cl_curl_useragent_append");
+
 	Cvar_RegisterVariable (&sv_curl_defaulturl);
 	Cvar_RegisterVariable (&sv_curl_serverpackages);
 	Cvar_RegisterVariable (&sv_curl_maxspeed);
-	Cvar_RegisterVariable (&cl_curl_useragent);
-	Cvar_RegisterVariable (&cl_curl_useragent_append);
+
 	Cvar_RegisterVariable (&developer_curl);
+
 	Cmd_AddCommand(CF_CLIENT | CF_CLIENT_FROM_SERVER, "curl", Curl_Curl_f, "download data from an URL and add to search path");
 	//Cmd_AddCommand(cmd_local, "curlcat", Curl_CurlCat_f, "display data from an URL (debugging command)");
 }
@@ -1590,7 +1637,7 @@ Curl_downloadinfo_t *Curl_GetDownloadInfo(int *nDownloads, const char **addition
 		if(developer.integer <= 0)
 			if(di->buffer)
 				continue;
-		strlcpy(downinfo[i].filename, di->filename, sizeof(downinfo[i].filename));
+		dp_strlcpy(downinfo[i].filename, di->filename, sizeof(downinfo[i].filename));
 		if(di->curle)
 		{
 			downinfo[i].progress = Curl_GetDownloadAmount(di);
@@ -1681,7 +1728,7 @@ static const char *Curl_FindPackURL(const char *filename)
 						*urlend = 0;
 						if(matchpattern(filename, pattern, true))
 						{
-							strlcpy(foundurl, url, sizeof(foundurl));
+							dp_strlcpy(foundurl, url, sizeof(foundurl));
 							Z_Free(buf);
 							return foundurl;
 						}
@@ -1733,7 +1780,7 @@ void Curl_RequireFile(const char *filename)
 {
 	requirement *req = (requirement *) Z_Malloc(sizeof(*requirements));
 	req->next = requirements;
-	strlcpy(req->filename, filename, sizeof(req->filename));
+	dp_strlcpy(req->filename, filename, sizeof(req->filename));
 	requirements = req;
 }
 
@@ -1785,18 +1832,18 @@ static qbool Curl_SendRequirement(const char *filename, qbool foundone, char *se
 	if(packurl && *packurl && strcmp(packurl, "-"))
 	{
 		if(!foundone)
-			strlcat(sendbuffer, "curl --clear_autodownload\n", sendbuffer_len);
+			dp_strlcat(sendbuffer, "curl --clear_autodownload\n", sendbuffer_len);
 
-		strlcat(sendbuffer, "curl --pak --forthismap --as ", sendbuffer_len);
-		strlcat(sendbuffer, thispack, sendbuffer_len);
+		dp_strlcat(sendbuffer, "curl --pak --forthismap --as ", sendbuffer_len);
+		dp_strlcat(sendbuffer, thispack, sendbuffer_len);
 		if(sv_curl_maxspeed.value > 0)
 			dpsnprintf(sendbuffer + strlen(sendbuffer), sendbuffer_len - strlen(sendbuffer), " --maxspeed=%.1f", sv_curl_maxspeed.value);
-		strlcat(sendbuffer, " --for ", sendbuffer_len);
-		strlcat(sendbuffer, filename, sendbuffer_len);
-		strlcat(sendbuffer, " ", sendbuffer_len);
-		strlcat(sendbuffer, packurl, sendbuffer_len);
-		strlcat(sendbuffer, thispack, sendbuffer_len);
-		strlcat(sendbuffer, "\n", sendbuffer_len);
+		dp_strlcat(sendbuffer, " --for ", sendbuffer_len);
+		dp_strlcat(sendbuffer, filename, sendbuffer_len);
+		dp_strlcat(sendbuffer, " ", sendbuffer_len);
+		dp_strlcat(sendbuffer, packurl, sendbuffer_len);
+		dp_strlcat(sendbuffer, thispack, sendbuffer_len);
+		dp_strlcat(sendbuffer, "\n", sendbuffer_len);
 
 		return true;
 	}
@@ -1819,7 +1866,7 @@ void Curl_SendRequirements(void)
 		foundone = Curl_SendRequirement(com_token, foundone, sendbuffer, sizeof(sendbuffer)) || foundone;
 
 	if(foundone)
-		strlcat(sendbuffer, "curl --finish_autodownload\n", sizeof(sendbuffer));
+		dp_strlcat(sendbuffer, "curl --finish_autodownload\n", sizeof(sendbuffer));
 
 	if(strlen(sendbuffer) + 1 < sizeof(sendbuffer))
 		SV_ClientCommands("%s", sendbuffer);

@@ -53,10 +53,12 @@ const char *vm_m_extensions[] = {
 NULL
 };
 
-qbool MP_ConsoleCommand(const char *text)
+qbool MP_ConsoleCommand(const char *text, size_t textlen)
 {
 	prvm_prog_t *prog = MVM_prog;
-	return PRVM_ConsoleCommand(prog, text, &prog->funcoffsets.GameCommand, false, -1, 0, prog->loaded, "QC function GameCommand is missing");
+	if (setjmp(mp_abort))
+		return false;
+	return PRVM_ConsoleCommand(prog, text, textlen, &prog->funcoffsets.GameCommand, false, -1, 0, "QC function GameCommand is missing");
 }
 
 /*
@@ -193,19 +195,10 @@ static void VM_M_getresolution(prvm_prog_t *prog)
 	}
 	else if(nr == -1)
 	{
-		vid_mode_t *m = VID_GetDesktopMode();
-		if (m)
-		{
-			PRVM_G_VECTOR(OFS_RETURN)[0] = m->width;
-			PRVM_G_VECTOR(OFS_RETURN)[1] = m->height;
-			PRVM_G_VECTOR(OFS_RETURN)[2] = m->pixelheight_num / (prvm_vec_t) m->pixelheight_denom;
-		}
-		else
-		{
-			PRVM_G_VECTOR(OFS_RETURN)[0] = 0;
-			PRVM_G_VECTOR(OFS_RETURN)[1] = 0;
-			PRVM_G_VECTOR(OFS_RETURN)[2] = 0;
-		}
+		vid_mode_t m = VID_GetDesktopMode();
+		PRVM_G_VECTOR(OFS_RETURN)[0] = m.width;
+		PRVM_G_VECTOR(OFS_RETURN)[1] = m.height;
+		PRVM_G_VECTOR(OFS_RETURN)[2] = m.pixelheight_num / (prvm_vec_t) m.pixelheight_denom;
 	}
 	else
 	{
@@ -229,9 +222,9 @@ static void VM_M_getgamedirinfo(prvm_prog_t *prog)
 	if(nr >= 0 && nr < fs_all_gamedirs_count)
 	{
 		if(item == 0)
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, fs_all_gamedirs[nr].name );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, fs_all_gamedirs[nr].name, strlen(fs_all_gamedirs[nr].name));
 		else if(item == 1)
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, fs_all_gamedirs[nr].description );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, fs_all_gamedirs[nr].description, strlen(fs_all_gamedirs[nr].description));
 	}
 }
 
@@ -288,7 +281,7 @@ static void VM_M_getserverliststat(prvm_prog_t *prog)
 		PRVM_G_FLOAT ( OFS_RETURN ) = serverlist_sortflags;
 		return;
 	default:
-		VM_Warning(prog, "VM_M_getserverliststat: bad type %i!\n", type );
+		VM_Warning(prog, "VM_M_getserverliststat: bad type (%i) passed!\n", type);
 	}
 }
 
@@ -332,36 +325,37 @@ static void VM_M_setserverlistmaskstring(prvm_prog_t *prog)
 		mask = &serverlist_ormasks[masknr - 512 ];
 	else
 	{
-		VM_Warning(prog, "VM_M_setserverlistmaskstring: invalid mask number %i\n", masknr );
+		VM_Warning(prog, "VM_M_setserverlistmaskstring: invalid mask number (%i) passed!\n", masknr);
 		return;
 	}
 
 	field = (int) PRVM_G_FLOAT( OFS_PARM1 );
 
-	switch( field ) {
+	switch( field )
+	{
 		case SLIF_CNAME:
-			strlcpy( mask->info.cname, str, sizeof(mask->info.cname) );
+			mask->info.cname_len = dp_strlcpy(mask->info.cname, str, sizeof(mask->info.cname));
 			break;
 		case SLIF_NAME:
-			strlcpy( mask->info.name, str, sizeof(mask->info.name)  );
+			mask->info.name_len = dp_strlcpy(mask->info.name, str, sizeof(mask->info.name));
 			break;
 		case SLIF_QCSTATUS:
-			strlcpy( mask->info.qcstatus, str, sizeof(mask->info.qcstatus)  );
+			mask->info.qcstatus_len = dp_strlcpy(mask->info.qcstatus, str, sizeof(mask->info.qcstatus));
 			break;
 		case SLIF_PLAYERS:
-			strlcpy( mask->info.players, str, sizeof(mask->info.players)  );
+			mask->info.players_len = dp_strlcpy(mask->info.players, str, sizeof(mask->info.players));
 			break;
 		case SLIF_MAP:
-			strlcpy( mask->info.map, str, sizeof(mask->info.map)  );
+			mask->info.map_len = dp_strlcpy(mask->info.map, str, sizeof(mask->info.map));
 			break;
 		case SLIF_MOD:
-			strlcpy( mask->info.mod, str, sizeof(mask->info.mod)  );
+			mask->info.mod_len = dp_strlcpy(mask->info.mod, str, sizeof(mask->info.mod));
 			break;
 		case SLIF_GAME:
-			strlcpy( mask->info.game, str, sizeof(mask->info.game)  );
+			mask->info.game_len = dp_strlcpy(mask->info.game, str, sizeof(mask->info.game));
 			break;
 		default:
-			VM_Warning(prog, "VM_M_setserverlistmaskstring: Bad field number %i passed!\n", field );
+			VM_Warning(prog, "VM_M_setserverlistmaskstring: Bad field number (%i) passed!\n", field);
 			return;
 	}
 
@@ -394,14 +388,15 @@ static void VM_M_setserverlistmasknumber(prvm_prog_t *prog)
 		mask = &serverlist_ormasks[masknr - 512 ];
 	else
 	{
-		VM_Warning(prog, "VM_M_setserverlistmasknumber: invalid mask number %i\n", masknr );
+		VM_Warning(prog, "VM_M_setserverlistmasknumber: invalid mask number (%i) passed!\n", masknr);
 		return;
 	}
 
 	number = (int)PRVM_G_FLOAT( OFS_PARM2 );
 	field = (int) PRVM_G_FLOAT( OFS_PARM1 );
 
-	switch( field ) {
+	switch( field )
+	{
 		case SLIF_MAXPLAYERS:
 			mask->info.maxplayers = number;
 			break;
@@ -430,7 +425,7 @@ static void VM_M_setserverlistmasknumber(prvm_prog_t *prog)
 			mask->info.isfavorite = number != 0;
 			break;
 		default:
-			VM_Warning(prog, "VM_M_setserverlistmasknumber: Bad field number %i passed!\n", field );
+			VM_Warning(prog, "VM_M_setserverlistmasknumber: Bad field number (%i) passed!\n", field);
 			return;
 	}
 
@@ -449,7 +444,7 @@ resortserverlist
 static void VM_M_resortserverlist(prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(0, VM_M_resortserverlist);
-	ServerList_RebuildViewList();
+	ServerList_RebuildViewList(NULL);
 }
 
 /*
@@ -476,44 +471,45 @@ static void VM_M_getserverliststring(prvm_prog_t *prog)
 	}
 	else
 	{
-		if(hostnr < 0 || hostnr >= serverlist_viewcount)
+		if(hostnr < 0 || (unsigned)hostnr >= serverlist_viewcount)
 		{
-			Con_Print("VM_M_getserverliststring: bad hostnr passed!\n");
+			VM_Warning(prog, "VM_M_getserverliststring: bad hostnr (%i) passed!\n", hostnr);
 			return;
 		}
 		cache = ServerList_GetViewEntry(hostnr);
 	}
-	switch( (int) PRVM_G_FLOAT(OFS_PARM0) ) {
+	switch( (int) PRVM_G_FLOAT(OFS_PARM0) )
+	{
 		case SLIF_CNAME:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.cname );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.cname, cache->info.cname_len);
 			break;
 		case SLIF_NAME:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.name );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.name, cache->info.name_len);
 			break;
 		case SLIF_QCSTATUS:
-			PRVM_G_INT (OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.qcstatus );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.qcstatus, cache->info.qcstatus_len);
 			break;
 		case SLIF_PLAYERS:
-			PRVM_G_INT (OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.players );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.players, cache->info.players_len);
 			break;
 		case SLIF_GAME:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.game );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.game, cache->info.game_len);
 			break;
 		case SLIF_MOD:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.mod );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.mod, cache->info.mod_len);
 			break;
 		case SLIF_MAP:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->info.map );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->info.map, cache->info.map_len);
 			break;
 		// TODO remove this again
 		case 1024:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->line1 );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->line1, cache->line1_len);
 			break;
 		case 1025:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, cache->line2 );
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, cache->line2, cache->line2_len);
 			break;
 		default:
-			Con_Print("VM_M_getserverliststring: bad field number passed!\n");
+			VM_Warning(prog, "VM_M_getserverliststring: bad field number (%i) passed!\n", (int)PRVM_G_FLOAT(OFS_PARM0));
 	}
 }
 
@@ -541,14 +537,15 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 	}
 	else
 	{
-		if(hostnr < 0 || hostnr >= serverlist_viewcount)
+		if(hostnr < 0 || (unsigned)hostnr >= serverlist_viewcount)
 		{
-			Con_Print("VM_M_getserverliststring: bad hostnr passed!\n");
+			VM_Warning(prog, "VM_M_getserverliststring: bad hostnr (%i) passed!\n", hostnr);
 			return;
 		}
 		cache = ServerList_GetViewEntry(hostnr);
 	}
-	switch( (int) PRVM_G_FLOAT(OFS_PARM0) ) {
+	switch( (int) PRVM_G_FLOAT(OFS_PARM0) )
+	{
 		case SLIF_MAXPLAYERS:
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.maxplayers;
 			break;
@@ -565,7 +562,8 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.freeslots;
 			break;
 		case SLIF_PING:
-			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.ping;
+			// display inf when a listed server times out and net_slist_pause blocks its removal
+			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.ping ? cache->info.ping : INFINITY;
 			break;
 		case SLIF_PROTOCOL:
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.protocol;
@@ -577,7 +575,7 @@ static void VM_M_getserverlistnumber(prvm_prog_t *prog)
 			PRVM_G_FLOAT( OFS_RETURN ) = cache->info.isfavorite;
 			break;
 		default:
-			Con_Print("VM_M_getserverlistnumber: bad field number passed!\n");
+			VM_Warning(prog, "VM_M_getserverlistnumber: bad field number (%i) passed!\n", (int)PRVM_G_FLOAT(OFS_PARM0));
 	}
 }
 
@@ -801,9 +799,9 @@ static void VM_M_getmousepos(prvm_prog_t *prog)
 	if (key_consoleactive || (key_dest != key_menu && key_dest != key_menu_grabbed))
 		VectorSet(PRVM_G_VECTOR(OFS_RETURN), 0, 0, 0);
 	else if (in_client_mouse)
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.width, in_windowmouse_y * vid_conheight.integer / vid.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_windowmouse_x * vid_conwidth.integer / vid.mode.width, in_windowmouse_y * vid_conheight.integer / vid.mode.height, 0);
 	else
-		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.width, in_mouse_y * vid_conheight.integer / vid.height, 0);
+		VectorSet(PRVM_G_VECTOR(OFS_RETURN), in_mouse_x * vid_conwidth.integer / vid.mode.width, in_mouse_y * vid_conheight.integer / vid.mode.height, 0);
 }
 
 static void VM_M_crypto_getkeyfp(prvm_prog_t *prog)
@@ -818,7 +816,7 @@ static void VM_M_crypto_getkeyfp(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, keyfp, sizeof(keyfp), NULL, 0, NULL, NULL))
-		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, keyfp );
+		PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, keyfp, strlen(keyfp));
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -834,7 +832,7 @@ static void VM_M_crypto_getidfp(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, NULL, 0, idfp, sizeof(idfp), NULL, NULL))
-		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, idfp );
+		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString( prog, idfp, strlen(idfp));
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -867,7 +865,15 @@ static void VM_M_crypto_getencryptlevel(prvm_prog_t *prog)
 	VM_CheckEmptyString( prog, s );
 
 	if(LHNETADDRESS_FromString(&addr, s, 26000) && Crypto_RetrieveHostKey(&addr, NULL, NULL, 0, NULL, 0, &aeslevel, NULL))
-		PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, aeslevel ? va(vabuf, sizeof(vabuf), "%d AES128", aeslevel) : "0");
+	{
+		if (aeslevel)
+		{
+			size_t vabuf_len = dpsnprintf(vabuf, sizeof(vabuf), "%d AES128", aeslevel);
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, vabuf, vabuf_len);
+		}
+		else
+			PRVM_G_INT(OFS_RETURN) = PRVM_SetTempString(prog, "0", 1);
+	}
 	else
 		PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 }
@@ -882,14 +888,14 @@ static void VM_M_crypto_getmykeyfp(prvm_prog_t *prog)
 	switch(Crypto_RetrieveLocalKey(i, keyfp, sizeof(keyfp), NULL, 0, NULL))
 	{
 		case -1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "");
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "", 0);
 			break;
 		case 0:
 			PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 			break;
 		default:
 		case 1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, keyfp);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, keyfp, strlen(keyfp));
 			break;
 	}
 }
@@ -904,14 +910,14 @@ static void VM_M_crypto_getmyidfp(prvm_prog_t *prog)
 	switch(Crypto_RetrieveLocalKey(i, NULL, 0, idfp, sizeof(idfp), NULL))
 	{
 		case -1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "");
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, "", 0);
 			break;
 		case 0:
 			PRVM_G_INT( OFS_RETURN ) = OFS_NULL;
 			break;
 		default:
 		case 1:
-			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, idfp);
+			PRVM_G_INT( OFS_RETURN ) = PRVM_SetTempString(prog, idfp, strlen(idfp));
 			break;
 	}
 }
@@ -1058,8 +1064,7 @@ void VM_cin_restart(prvm_prog_t *prog)
 static void VM_M_registercommand(prvm_prog_t *prog)
 {
 	VM_SAFEPARMCOUNT(1, VM_M_registercommand);
-	if(!Cmd_Exists(cmd_local, PRVM_G_STRING(OFS_PARM0)))
-		Cmd_AddCommand(CF_CLIENT, PRVM_G_STRING(OFS_PARM0), NULL, "console command created by QuakeC");
+	Cmd_AddCommand(CF_CLIENT, PRVM_G_STRING(OFS_PARM0), NULL, "console command created by QuakeC");
 }
 
 prvm_builtin_t vm_m_builtins[] = {
@@ -1076,7 +1081,7 @@ VM_vlen,								//   #9
 VM_vectoyaw,						//  #10
 VM_vectoangles,					//  #11
 VM_random,							//  #12
-VM_localcmd_local,						//  #13
+VM_localcmd,						//  #13
 VM_cvar,								//  #14
 VM_cvar_set,						//  #15
 VM_dprint,							//  #16

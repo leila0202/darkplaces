@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t cl_capturevideo;
 extern cvar_t cl_capturevideo_demo_stop;
 #endif
-int old_vsync = 0;
 
 static void CL_FinishTimeDemo (void);
 
@@ -83,7 +82,7 @@ void CL_StopPlayback (void)
 {
 #ifdef CONFIG_VIDEO_CAPTURE
 	if (cl_capturevideo_demo_stop.integer)
-		Cvar_Set(&cvars_all, "cl_capturevideo", "0");
+		Cvar_SetQuick(&cl_capturevideo, "0");
 #endif
 
 	if (!cls.demoplayback)
@@ -245,6 +244,13 @@ void CL_ReadDemoMessage(void)
 			}
 		}
 
+		/* At signon 1 the cl_begindownloads command starts the world and, if applicable,
+		 * boots up CSQC which may be required to parse the next message.
+		 * That will be delayed if curl must first (down)load the map.
+		 */
+		if (cls.signon == 1 && cl.loadcsqc) // waiting for CL_VM_Init() to be called
+			return;
+
 		// get the next message
 		FS_Read(cls.demofile, &cl_message.cursize, 4);
 		cl_message.cursize = LittleLong(cl_message.cursize);
@@ -342,6 +348,7 @@ void CL_Record_f(cmd_state_t *cmd)
 	int c, track;
 	char name[MAX_OSPATH];
 	char vabuf[1024];
+	int vabuf_len;
 
 	c = Cmd_Argc(cmd);
 	if (c != 2 && c != 3 && c != 4)
@@ -375,12 +382,15 @@ void CL_Record_f(cmd_state_t *cmd)
 		track = -1;
 
 	// get the demo name
-	strlcpy (name, Cmd_Argv(cmd, 1), sizeof (name));
+	dp_strlcpy (name, Cmd_Argv(cmd, 1), sizeof (name));
 	FS_DefaultExtension (name, ".dem", sizeof (name));
 
 	// start the map up
 	if (c > 2)
-		Cmd_ExecuteString ( cmd, va(vabuf, sizeof(vabuf), "map %s", Cmd_Argv(cmd, 2)), src_local, false);
+	{
+		vabuf_len = dpsnprintf(vabuf, sizeof(vabuf), "map %s", Cmd_Argv(cmd, 2));
+		Cmd_ExecuteString(cmd, vabuf, vabuf_len, src_local, false);
+	}
 
 	// open the demo file
 	Con_Printf("recording to %s.\n", name);
@@ -390,7 +400,7 @@ void CL_Record_f(cmd_state_t *cmd)
 		Con_Print(CON_ERROR "ERROR: couldn't open.\n");
 		return;
 	}
-	strlcpy(cls.demoname, name, sizeof(cls.demoname));
+	dp_strlcpy(cls.demoname, name, sizeof(cls.demoname));
 
 	cls.forcetrack = track;
 	FS_Printf(cls.demofile, "%i\n", cls.forcetrack);
@@ -408,7 +418,7 @@ void CL_PlayDemo(const char *demo)
 	qfile_t *f;
 
 	// open the demo file
-	strlcpy (name, demo, sizeof (name));
+	dp_strlcpy (name, demo, sizeof (name));
 	FS_DefaultExtension (name, ".dem", sizeof (name));
 	f = FS_OpenVirtualFile(name, false);
 	if (!f)
@@ -430,7 +440,7 @@ void CL_PlayDemo(const char *demo)
 
 	Con_Printf("Playing demo %s.\n", name);
 	cls.demofile = f;
-	strlcpy(cls.demoname, name, sizeof(cls.demoname));
+	dp_strlcpy(cls.demoname, name, sizeof(cls.demoname));
 
 	cls.demoplayback = true;
 	cls.state = ca_connected;
@@ -510,7 +520,8 @@ static void CL_FinishTimeDemo (void)
 	fpsmax = cls.td_onesecondmaxfps;
 	// LadyHavoc: timedemo now prints out 7 digits of fraction, and min/avg/max
 	Con_Printf("%i frames %5.7f seconds %5.7f fps, one-second fps min/avg/max: %.0f %.0f %.0f (%i seconds)\n", frames, time, totalfpsavg, fpsmin, fpsavg, fpsmax, cls.td_onesecondavgcount);
-	Log_Printf("benchmark.log", "date %s | enginedate %s | demo %s | commandline %s | run %d | result %i frames %5.7f seconds %5.7f fps, one-second fps min/avg/max: %.0f %.0f %.0f (%i seconds)\n", Sys_TimeString("%Y-%m-%d %H:%M:%S"), buildstring, cls.demoname, cmdline.string, benchmark_runs + 1, frames, time, totalfpsavg, fpsmin, fpsavg, fpsmax, cls.td_onesecondavgcount);
+	Sys_TimeString(vabuf, sizeof(vabuf), "%Y-%m-%d %H:%M:%S");
+	Log_Printf("benchmark.log", "date %s | enginedate %s | demo %s | commandline %s | run %d | result %i frames %5.7f seconds %5.7f fps, one-second fps min/avg/max: %.0f %.0f %.0f (%i seconds)\n", vabuf, engineversion, cls.demoname, cmdline.string, benchmark_runs + 1, frames, time, totalfpsavg, fpsmin, fpsavg, fpsmax, cls.td_onesecondavgcount);
 	if (Sys_CheckParm("-benchmark"))
 	{
 		++benchmark_runs;
@@ -586,6 +597,9 @@ static void CL_FinishTimeDemo (void)
 		else
 			host.state = host_shutdown;
 	}
+
+	// Might need to re-enable vsync
+	Cvar_Callback(&vid_vsync);
 }
 
 /*
@@ -618,6 +632,9 @@ void CL_TimeDemo_f(cmd_state_t *cmd)
 	cls.timedemo = host.restless = true;
 	cls.td_frames = -2;		// skip the first frame
 	cls.demonum = -1;		// stop demo loop
+
+	// Might need to disable vsync
+	Cvar_Callback(&vid_vsync);
 }
 
 /*
@@ -650,7 +667,7 @@ static void CL_Startdemos_f(cmd_state_t *cmd)
 	Con_DPrintf("%i demo(s) in loop\n", c);
 
 	for (i=1 ; i<c+1 ; i++)
-		strlcpy (cls.demos[i-1], Cmd_Argv(cmd, i), sizeof (cls.demos[i-1]));
+		dp_strlcpy (cls.demos[i-1], Cmd_Argv(cmd, i), sizeof (cls.demos[i-1]));
 
 	// LadyHavoc: clear the remaining slots
 	for (;i <= MAX_DEMOS;i++)
@@ -658,6 +675,16 @@ static void CL_Startdemos_f(cmd_state_t *cmd)
 
 	if (!sv.active && cls.demonum != -1 && !cls.demoplayback)
 	{
+		if (!cl_startdemos.integer)
+		{
+			cls.demonum = -1;
+#ifdef CONFIG_MENU
+			// make the menu appear after a gamedir change
+			if(MR_ToggleMenu)
+				MR_ToggleMenu(1);
+#endif
+			return;
+		}
 		cls.demonum = 0;
 		CL_NextDemo ();
 	}
@@ -721,4 +748,5 @@ void CL_Demo_Init(void)
 	Cvar_RegisterVariable (&cl_autodemo);
 	Cvar_RegisterVariable (&cl_autodemo_nameformat);
 	Cvar_RegisterVariable (&cl_autodemo_delete);
+	Cvar_RegisterVariable (&cl_startdemos);
 }

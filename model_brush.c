@@ -26,28 +26,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "wad.h"
 
 
+cvar_t r_trippy = {CF_CLIENT, "r_trippy", "0", "easter egg"};
 //cvar_t r_subdivide_size = {CF_CLIENT | CF_ARCHIVE, "r_subdivide_size", "128", "how large water polygons should be (smaller values produce more polygons which give better warping effects)"};
-cvar_t mod_bsp_portalize = {CF_CLIENT | CF_SERVER, "mod_bsp_portalize", "1", "enables portal generation from BSP tree (may take several seconds per map), used by r_drawportals, r_useportalculling, r_shadow_realtime_world_compileportalculling, sv_cullentities_portal"};
 cvar_t r_novis = {CF_CLIENT, "r_novis", "0", "draws whole level, see also sv_cullentities_pvs 0"};
 cvar_t r_nosurftextures = {CF_CLIENT, "r_nosurftextures", "0", "pretends there was no texture lump found in the q1bsp/hlbsp loading (useful for debugging this rare case)"};
+
 cvar_t r_subdivisions_tolerance = {CF_CLIENT, "r_subdivisions_tolerance", "4", "maximum error tolerance on curve subdivision for rendering purposes (in other words, the curves will be given as many polygons as necessary to represent curves at this quality)"};
 cvar_t r_subdivisions_mintess = {CF_CLIENT, "r_subdivisions_mintess", "0", "minimum number of subdivisions (values above 0 will smooth curves that don't need it)"};
 cvar_t r_subdivisions_maxtess = {CF_CLIENT, "r_subdivisions_maxtess", "1024", "maximum number of subdivisions (prevents curves beyond a certain detail level, limits smoothing)"};
 cvar_t r_subdivisions_maxvertices = {CF_CLIENT, "r_subdivisions_maxvertices", "65536", "maximum vertices allowed per subdivided curve"};
-cvar_t r_subdivisions_collision_tolerance = {CF_CLIENT, "r_subdivisions_collision_tolerance", "15", "maximum error tolerance on curve subdivision for collision purposes (usually a larger error tolerance than for rendering)"};
-cvar_t r_subdivisions_collision_mintess = {CF_CLIENT, "r_subdivisions_collision_mintess", "0", "minimum number of subdivisions (values above 0 will smooth curves that don't need it)"};
-cvar_t r_subdivisions_collision_maxtess = {CF_CLIENT, "r_subdivisions_collision_maxtess", "1024", "maximum number of subdivisions (prevents curves beyond a certain detail level, limits smoothing)"};
-cvar_t r_subdivisions_collision_maxvertices = {CF_CLIENT, "r_subdivisions_collision_maxvertices", "4225", "maximum vertices allowed per subdivided curve"};
-cvar_t r_trippy = {CF_CLIENT, "r_trippy", "0", "easter egg"};
-cvar_t r_fxaa = {CF_CLIENT | CF_ARCHIVE, "r_fxaa", "0", "fast approximate anti aliasing"};
-cvar_t mod_noshader_default_offsetmapping = {CF_CLIENT | CF_ARCHIVE, "mod_noshader_default_offsetmapping", "1", "use offsetmapping by default on all surfaces that are not using q3 shader files"};
-cvar_t mod_obj_orientation = {CF_CLIENT | CF_SERVER, "mod_obj_orientation", "1", "fix orientation of OBJ models to the usual conventions (if zero, use coordinates as is)"};
-cvar_t mod_q2bsp_littransparentsurfaces = {CF_CLIENT, "mod_q2bsp_littransparentsurfaces", "0", "allows lighting on rain in 3v3gloom3 and other cases of transparent surfaces that have lightmaps that were ignored by quake2"};
+cvar_t mod_q3bsp_curves_subdivisions_tolerance = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_subdivisions_tolerance", "15", "maximum error tolerance on curve subdivision for collision purposes (usually a larger error tolerance than for rendering)"};
+cvar_t mod_q3bsp_curves_subdivisions_mintess = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_subdivisions_mintess", "0", "minimum number of subdivisions for collision purposes (values above 0 will smooth curves that don't need it)"};
+cvar_t mod_q3bsp_curves_subdivisions_maxtess = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_subdivisions_maxtess", "1024", "maximum number of subdivisions for collision purposes (prevents curves beyond a certain detail level, limits smoothing)"};
+cvar_t mod_q3bsp_curves_subdivisions_maxvertices = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_subdivisions_maxvertices", "4225", "maximum vertices allowed per subdivided curve for collision purposes"};
 cvar_t mod_q3bsp_curves_collisions = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_collisions", "1", "enables collisions with curves (SLOW)"};
-cvar_t mod_q3bsp_curves_collisions_stride = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_collisions_stride", "16", "collisions against curves: optimize performance by doing a combined collision check for this triangle amount first (-1 avoids any box tests)"};
-cvar_t mod_q3bsp_curves_stride = {CF_CLIENT | CF_SERVER, "mod_q3bsp_curves_stride", "16", "particle effect collisions against curves: optimize performance by doing a combined collision check for this triangle amount first (-1 avoids any box tests)"};
 cvar_t mod_q3bsp_optimizedtraceline = {CF_CLIENT | CF_SERVER, "mod_q3bsp_optimizedtraceline", "1", "whether to use optimized traceline code for line traces (as opposed to tracebox code)"};
-cvar_t mod_q3bsp_debugtracebrush = {CF_CLIENT | CF_SERVER, "mod_q3bsp_debugtracebrush", "0", "selects different tracebrush bsp recursion algorithms (for debugging purposes only)"};
 cvar_t mod_q3bsp_lightmapmergepower = {CF_CLIENT | CF_ARCHIVE, "mod_q3bsp_lightmapmergepower", "4", "merges the quake3 128x128 lightmap textures into larger lightmap group textures to speed up rendering, 1 = 256x256, 2 = 512x512, 3 = 1024x1024, 4 = 2048x2048, 5 = 4096x4096, ..."};
 cvar_t mod_q3bsp_nolightmaps = {CF_CLIENT | CF_ARCHIVE, "mod_q3bsp_nolightmaps", "0", "do not load lightmaps in Q3BSP maps (to save video RAM, but be warned: it looks ugly)"};
 cvar_t mod_q3bsp_tracelineofsight_brushes = {CF_CLIENT | CF_SERVER, "mod_q3bsp_tracelineofsight_brushes", "0", "enables culling of entities behind detail brushes, curves, etc"};
@@ -55,6 +48,7 @@ cvar_t mod_q3bsp_sRGBlightmaps = {CF_CLIENT, "mod_q3bsp_sRGBlightmaps", "0", "tr
 cvar_t mod_q3bsp_lightgrid_texture = {CF_CLIENT, "mod_q3bsp_lightgrid_texture", "1", "directly apply the lightgrid as a global texture rather than only reading it at the entity origin"};
 cvar_t mod_q3bsp_lightgrid_world_surfaces = {CF_CLIENT, "mod_q3bsp_lightgrid_world_surfaces", "0", "apply lightgrid lighting to the world bsp geometry rather than using lightmaps (experimental/debug tool)"};
 cvar_t mod_q3bsp_lightgrid_bsp_surfaces = {CF_CLIENT, "mod_q3bsp_lightgrid_bsp_surfaces", "0", "apply lightgrid lighting to bsp models other than the world rather than using their lightmaps (experimental/debug tool)"};
+cvar_t mod_noshader_default_offsetmapping = {CF_CLIENT | CF_ARCHIVE, "mod_noshader_default_offsetmapping", "1", "use offsetmapping by default on all surfaces that are not using q3 shader files"};
 cvar_t mod_q3shader_default_offsetmapping = {CF_CLIENT | CF_ARCHIVE, "mod_q3shader_default_offsetmapping", "1", "use offsetmapping by default on all surfaces that are using q3 shader files"};
 cvar_t mod_q3shader_default_offsetmapping_scale = {CF_CLIENT | CF_ARCHIVE, "mod_q3shader_default_offsetmapping_scale", "1", "default scale used for offsetmapping"};
 cvar_t mod_q3shader_default_offsetmapping_bias = {CF_CLIENT | CF_ARCHIVE, "mod_q3shader_default_offsetmapping_bias", "0", "default bias used for offsetmapping"};
@@ -64,8 +58,16 @@ cvar_t mod_q3shader_default_refractive_index = {CF_CLIENT, "mod_q3shader_default
 cvar_t mod_q3shader_force_addalpha = {CF_CLIENT, "mod_q3shader_force_addalpha", "0", "treat GL_ONE GL_ONE (or add) blendfunc as GL_SRC_ALPHA GL_ONE for compatibility with older DarkPlaces releases"};
 cvar_t mod_q3shader_force_terrain_alphaflag = {CF_CLIENT, "mod_q3shader_force_terrain_alphaflag", "0", "for multilayered terrain shaders force TEXF_ALPHA flag on both layers"};
 
+cvar_t mod_q2bsp_littransparentsurfaces = {CF_CLIENT, "mod_q2bsp_littransparentsurfaces", "0", "allows lighting on rain in 3v3gloom3 and other cases of transparent surfaces that have lightmaps that were ignored by quake2"};
+
 cvar_t mod_q1bsp_polygoncollisions = {CF_CLIENT | CF_SERVER, "mod_q1bsp_polygoncollisions", "0", "disables use of precomputed cliphulls and instead collides with polygons (uses Bounding Interval Hierarchy optimizations)"};
+cvar_t mod_q1bsp_traceoutofsolid = {CF_SHARED, "mod_q1bsp_traceoutofsolid", "1", "enables tracebox to move an entity that's stuck in solid brushwork out to empty space, 1 matches FTEQW and QSS and is required by many community maps (items/monsters will be missing otherwise), 0 matches old versions of DP and the original Quake engine (if your map or QC needs 0 it's buggy)"};
+cvar_t mod_q1bsp_zero_hullsize_cutoff = {CF_CLIENT | CF_SERVER, "mod_q1bsp_zero_hullsize_cutoff", "3", "bboxes with an X dimension smaller than this will use the smallest cliphull (0x0x0) instead of being rounded up to the player cliphull (32x32x56) in Q1BSP, or crouching player (32x32x36) in HLBSP"};
+
+cvar_t mod_bsp_portalize = {CF_CLIENT, "mod_bsp_portalize", "0", "enables portal generation from BSP tree (takes a minute or more and GBs of memory when loading a complex map), used by r_drawportals, r_useportalculling, r_shadow_realtime_dlight_portalculling, r_shadow_realtime_world_compileportalculling"};
 cvar_t mod_recalculatenodeboxes = {CF_CLIENT | CF_SERVER, "mod_recalculatenodeboxes", "1", "enables use of generated node bounding boxes based on BSP tree portal reconstruction, rather than the node boxes supplied by the map compiler"};
+
+cvar_t mod_obj_orientation = {CF_CLIENT | CF_SERVER, "mod_obj_orientation", "1", "fix orientation of OBJ models to the usual conventions (if zero, use coordinates as is)"};
 
 static texture_t mod_q1bsp_texture_solid;
 static texture_t mod_q1bsp_texture_sky;
@@ -85,20 +87,16 @@ void Mod_BrushInit(void)
 	Cvar_RegisterVariable(&r_subdivisions_mintess);
 	Cvar_RegisterVariable(&r_subdivisions_maxtess);
 	Cvar_RegisterVariable(&r_subdivisions_maxvertices);
-	Cvar_RegisterVariable(&r_subdivisions_collision_tolerance);
-	Cvar_RegisterVariable(&r_subdivisions_collision_mintess);
-	Cvar_RegisterVariable(&r_subdivisions_collision_maxtess);
-	Cvar_RegisterVariable(&r_subdivisions_collision_maxvertices);
+	Cvar_RegisterVariable(&mod_q3bsp_curves_subdivisions_tolerance);
+	Cvar_RegisterVariable(&mod_q3bsp_curves_subdivisions_mintess);
+	Cvar_RegisterVariable(&mod_q3bsp_curves_subdivisions_maxtess);
+	Cvar_RegisterVariable(&mod_q3bsp_curves_subdivisions_maxvertices);
 	Cvar_RegisterVariable(&r_trippy);
-	Cvar_RegisterVariable(&r_fxaa);
 	Cvar_RegisterVariable(&mod_noshader_default_offsetmapping);
 	Cvar_RegisterVariable(&mod_obj_orientation);
 	Cvar_RegisterVariable(&mod_q2bsp_littransparentsurfaces);
 	Cvar_RegisterVariable(&mod_q3bsp_curves_collisions);
-	Cvar_RegisterVariable(&mod_q3bsp_curves_collisions_stride);
-	Cvar_RegisterVariable(&mod_q3bsp_curves_stride);
 	Cvar_RegisterVariable(&mod_q3bsp_optimizedtraceline);
-	Cvar_RegisterVariable(&mod_q3bsp_debugtracebrush);
 	Cvar_RegisterVariable(&mod_q3bsp_lightmapmergepower);
 	Cvar_RegisterVariable(&mod_q3bsp_nolightmaps);
 	Cvar_RegisterVariable(&mod_q3bsp_sRGBlightmaps);
@@ -115,6 +113,8 @@ void Mod_BrushInit(void)
 	Cvar_RegisterVariable(&mod_q3shader_force_addalpha);
 	Cvar_RegisterVariable(&mod_q3shader_force_terrain_alphaflag);
 	Cvar_RegisterVariable(&mod_q1bsp_polygoncollisions);
+	Cvar_RegisterVariable(&mod_q1bsp_traceoutofsolid);
+	Cvar_RegisterVariable(&mod_q1bsp_zero_hullsize_cutoff);
 	Cvar_RegisterVariable(&mod_recalculatenodeboxes);
 
 	// these games were made for older DP engines and are no longer
@@ -123,27 +123,27 @@ void Mod_BrushInit(void)
 		Cvar_SetQuick(&mod_q3shader_force_addalpha, "1");
 
 	memset(&mod_q1bsp_texture_solid, 0, sizeof(mod_q1bsp_texture_solid));
-	strlcpy(mod_q1bsp_texture_solid.name, "solid" , sizeof(mod_q1bsp_texture_solid.name));
+	dp_strlcpy(mod_q1bsp_texture_solid.name, "solid" , sizeof(mod_q1bsp_texture_solid.name));
 	mod_q1bsp_texture_solid.surfaceflags = 0;
 	mod_q1bsp_texture_solid.supercontents = SUPERCONTENTS_SOLID;
 
 	mod_q1bsp_texture_sky = mod_q1bsp_texture_solid;
-	strlcpy(mod_q1bsp_texture_sky.name, "sky", sizeof(mod_q1bsp_texture_sky.name));
+	dp_strlcpy(mod_q1bsp_texture_sky.name, "sky", sizeof(mod_q1bsp_texture_sky.name));
 	mod_q1bsp_texture_sky.surfaceflags = Q3SURFACEFLAG_SKY | Q3SURFACEFLAG_NOIMPACT | Q3SURFACEFLAG_NOMARKS | Q3SURFACEFLAG_NODLIGHT | Q3SURFACEFLAG_NOLIGHTMAP;
 	mod_q1bsp_texture_sky.supercontents = SUPERCONTENTS_SKY | SUPERCONTENTS_NODROP;
 
 	mod_q1bsp_texture_lava = mod_q1bsp_texture_solid;
-	strlcpy(mod_q1bsp_texture_lava.name, "*lava", sizeof(mod_q1bsp_texture_lava.name));
+	dp_strlcpy(mod_q1bsp_texture_lava.name, "*lava", sizeof(mod_q1bsp_texture_lava.name));
 	mod_q1bsp_texture_lava.surfaceflags = Q3SURFACEFLAG_NOMARKS;
 	mod_q1bsp_texture_lava.supercontents = SUPERCONTENTS_LAVA | SUPERCONTENTS_NODROP;
 
 	mod_q1bsp_texture_slime = mod_q1bsp_texture_solid;
-	strlcpy(mod_q1bsp_texture_slime.name, "*slime", sizeof(mod_q1bsp_texture_slime.name));
+	dp_strlcpy(mod_q1bsp_texture_slime.name, "*slime", sizeof(mod_q1bsp_texture_slime.name));
 	mod_q1bsp_texture_slime.surfaceflags = Q3SURFACEFLAG_NOMARKS;
 	mod_q1bsp_texture_slime.supercontents = SUPERCONTENTS_SLIME;
 
 	mod_q1bsp_texture_water = mod_q1bsp_texture_solid;
-	strlcpy(mod_q1bsp_texture_water.name, "*water", sizeof(mod_q1bsp_texture_water.name));
+	dp_strlcpy(mod_q1bsp_texture_water.name, "*water", sizeof(mod_q1bsp_texture_water.name));
 	mod_q1bsp_texture_water.surfaceflags = Q3SURFACEFLAG_NOMARKS;
 	mod_q1bsp_texture_water.supercontents = SUPERCONTENTS_WATER;
 }
@@ -762,7 +762,7 @@ static int Mod_Q1BSP_RecursiveHullCheck(RecursiveHullCheckTraceInfo_t *t, int nu
 			// recurse both sides, front side first
 			ret = Mod_Q1BSP_RecursiveHullCheck(t, node->children[p1side], p1f, midf, p1, mid);
 			// if this side is not empty, return what it is (solid or done)
-			if (ret != HULLCHECKSTATE_EMPTY)
+			if (ret != HULLCHECKSTATE_EMPTY && (!t->trace->allsolid || !mod_q1bsp_traceoutofsolid.integer))
 				return ret;
 
 			ret = Mod_Q1BSP_RecursiveHullCheck(t, node->children[p2side], midf, p2f, mid, p2);
@@ -976,7 +976,7 @@ static void Mod_Q1BSP_TraceBox(struct model_s *model, const frameblend_t *frameb
 	rhc.trace->fraction = 1;
 	rhc.trace->allsolid = true;
 	VectorSubtract(boxmaxs, boxmins, boxsize);
-	if (boxsize[0] < 3)
+	if (boxsize[0] < mod_q1bsp_zero_hullsize_cutoff.value)
 		rhc.hull = &model->brushq1.hulls[0]; // 0x0x0
 	else if (model->brush.ishlbsp)
 	{
@@ -1005,7 +1005,7 @@ static void Mod_Q1BSP_TraceBox(struct model_s *model, const frameblend_t *frameb
 	VectorMAMAM(1, end, 1, boxmins, -1, rhc.hull->clip_mins, rhc.end);
 	VectorSubtract(rhc.end, rhc.start, rhc.dist);
 #if COLLISIONPARANOID >= 2
-	Con_Printf("t(%f %f %f,%f %f %f,%i %f %f %f)", rhc.start[0], rhc.start[1], rhc.start[2], rhc.end[0], rhc.end[1], rhc.end[2], rhc.hull - model->brushq1.hulls, rhc.hull->clip_mins[0], rhc.hull->clip_mins[1], rhc.hull->clip_mins[2]);
+	Con_Printf("t(%f %f %f,%f %f %f,%li %f %f %f)", rhc.start[0], rhc.start[1], rhc.start[2], rhc.end[0], rhc.end[1], rhc.end[2], rhc.hull - model->brushq1.hulls, rhc.hull->clip_mins[0], rhc.hull->clip_mins[1], rhc.hull->clip_mins[2]);
 	Mod_Q1BSP_RecursiveHullCheck(&rhc, rhc.hull->firstclipnode, 0, 1, rhc.start, rhc.end);
 	{
 
@@ -1627,8 +1627,21 @@ static void Mod_Q1BSP_LoadSplitSky (unsigned char *src, int width, int height, i
 		}
 	}
 
-	loadmodel->brush.solidskyskinframe = R_SkinFrame_LoadInternalBGRA("sky_solidtexture", 0         , (unsigned char *) solidpixels, w, h, 0, 0, 0, vid.sRGB3D);
-	loadmodel->brush.alphaskyskinframe = R_SkinFrame_LoadInternalBGRA("sky_alphatexture", TEXF_ALPHA, (unsigned char *) alphapixels, w, h, 0, 0, 0, vid.sRGB3D);
+	// Load the solid and alpha parts of the sky texture as separate textures
+	loadmodel->brush.solidskyskinframe = R_SkinFrame_LoadInternalBGRA(
+		"sky_solidtexture",
+		0,
+		(unsigned char *) solidpixels,
+		w, h, w, h,
+		CRC_Block((unsigned char *) solidpixels, w*h*4),
+		vid.sRGB3D);
+	loadmodel->brush.alphaskyskinframe = R_SkinFrame_LoadInternalBGRA(
+		"sky_alphatexture",
+		TEXF_ALPHA,
+		(unsigned char *) alphapixels,
+		w, h, w, h,
+		CRC_Block((unsigned char *) alphapixels, w*h*4),
+		vid.sRGB3D);
 	Mem_Free(solidpixels);
 	Mem_Free(alphapixels);
 }
@@ -1685,6 +1698,10 @@ static void Mod_Q1BSP_LoadTextures(sizebuf_t *sb)
 			// pretty up the buffer (replacing any trailing garbage with 0)
 			for (j = (int)strlen(name); j < 16; j++)
 				name[j] = 0;
+			// bones_was_here: force all names to lowercase (matching code below) so we don't crash on e2m9
+			for (j = 0;name[j];j++)
+				if (name[j] >= 'A' && name[j] <= 'Z')
+					name[j] += 'a' - 'A';
 
 			if (!strncmp(name, "sky", 3))
 				numsky++;
@@ -1712,7 +1729,7 @@ static void Mod_Q1BSP_LoadTextures(sizebuf_t *sb)
 	skinframemissing = R_SkinFrame_LoadMissing();
 	for (i = 0, tx = loadmodel->data_textures;i < loadmodel->num_textures;i++, tx++)
 	{
-		strlcpy(tx->name, "NO TEXTURE FOUND", sizeof(tx->name));
+		dp_strlcpy(tx->name, "NO TEXTURE FOUND", sizeof(tx->name));
 		tx->width = 16;
 		tx->height = 16;
 		tx->basealpha = 1.0f;
@@ -1830,7 +1847,7 @@ static void Mod_Q1BSP_LoadTextures(sizebuf_t *sb)
 		// no luck with loading shaders or external textures - restore the in-progress texture loading
 		loadmodel->data_textures[i] = backuptex;
 
-		strlcpy(tx->name, name, sizeof(tx->name));
+		dp_strlcpy(tx->name, name, sizeof(tx->name));
 		tx->width = mtwidth;
 		tx->height = mtheight;
 		tx->basealpha = 1.0f;
@@ -2107,11 +2124,11 @@ static void Mod_Q1BSP_LoadLighting(sizebuf_t *sb)
 	else // LadyHavoc: bsp version 29 (normal white lighting)
 	{
 		// LadyHavoc: hope is not lost yet, check for a .lit file to load
-		strlcpy (litfilename, loadmodel->name, sizeof (litfilename));
+		dp_strlcpy (litfilename, loadmodel->name, sizeof (litfilename));
 		FS_StripExtension (litfilename, litfilename, sizeof (litfilename));
-		strlcpy (dlitfilename, litfilename, sizeof (dlitfilename));
-		strlcat (litfilename, ".lit", sizeof (litfilename));
-		strlcat (dlitfilename, ".dlit", sizeof (dlitfilename));
+		dp_strlcpy (dlitfilename, litfilename, sizeof (dlitfilename));
+		dp_strlcat (litfilename, ".lit", sizeof (litfilename));
+		dp_strlcat (dlitfilename, ".dlit", sizeof (dlitfilename));
 		data = (unsigned char*) FS_LoadFile(litfilename, tempmempool, false, &filesize);
 		if (data)
 		{
@@ -2204,9 +2221,9 @@ static void Mod_Q1BSP_ParseWadsFromEntityLump(const char *data)
 		if (com_token[0] == '}')
 			break; // end of worldspawn
 		if (com_token[0] == '_')
-			strlcpy(key, com_token + 1, sizeof(key));
+			dp_strlcpy(key, com_token + 1, sizeof(key));
 		else
-			strlcpy(key, com_token, sizeof(key));
+			dp_strlcpy(key, com_token, sizeof(key));
 		while (key[strlen(key)-1] == ' ') // remove trailing spaces
 			key[strlen(key)-1] = 0;
 		if (!COM_ParseToken_Simple(&data, false, false, true))
@@ -3805,18 +3822,26 @@ static void Mod_BSP_FatPVS_RecursiveBSPNode(model_t *model, const vec3_t org, ve
 
 //Calculates a PVS that is the inclusive or of all leafs within radius pixels
 //of the given point.
-static int Mod_BSP_FatPVS(model_t *model, const vec3_t org, vec_t radius, unsigned char *pvsbuffer, int pvsbufferlength, qbool merge)
+static size_t Mod_BSP_FatPVS(model_t *model, const vec3_t org, vec_t radius, unsigned char **pvsbuffer, mempool_t *pool, qbool merge)
 {
-	int bytes = model->brush.num_pvsclusterbytes;
-	bytes = min(bytes, pvsbufferlength);
+	size_t bytes = model->brush.num_pvsclusterbytes;
+
+	if (!*pvsbuffer || bytes != Mem_Size(*pvsbuffer))
+	{
+//		Con_Printf("^4FatPVS: allocating a%s ^4buffer in pool %s, old size %zu new size %zu\n", *pvsbuffer == NULL ? " ^5NEW" : "", pool->name, *pvsbuffer != NULL ? Mem_Size(*pvsbuffer) : 0, bytes);
+		if (*pvsbuffer)
+			Mem_Free(*pvsbuffer); // don't reuse stale data when the worldmodel changes
+		*pvsbuffer = Mem_AllocType(pool, unsigned char, bytes);
+	}
+
 	if (r_novis.integer || r_trippy.integer || !model->brush.num_pvsclusters || !Mod_BSP_GetPVS(model, org))
 	{
-		memset(pvsbuffer, 0xFF, bytes);
+		memset(*pvsbuffer, 0xFF, bytes);
 		return bytes;
 	}
 	if (!merge)
-		memset(pvsbuffer, 0, bytes);
-	Mod_BSP_FatPVS_RecursiveBSPNode(model, org, radius, pvsbuffer, bytes, model->brush.data_nodes + model->brushq1.hulls[0].firstclipnode);
+		memset(*pvsbuffer, 0, bytes);
+	Mod_BSP_FatPVS_RecursiveBSPNode(model, org, radius, *pvsbuffer, bytes, model->brush.data_nodes + model->brushq1.hulls[0].firstclipnode);
 	return bytes;
 }
 
@@ -3826,11 +3851,11 @@ static void Mod_Q1BSP_RoundUpToHullSize(model_t *cmodel, const vec3_t inmins, co
 	const hull_t *hull;
 
 	VectorSubtract(inmaxs, inmins, size);
-	if (cmodel->brush.ishlbsp)
+	if (size[0] < mod_q1bsp_zero_hullsize_cutoff.value)
+		hull = &cmodel->brushq1.hulls[0]; // 0x0x0
+	else if (cmodel->brush.ishlbsp)
 	{
-		if (size[0] < 3)
-			hull = &cmodel->brushq1.hulls[0]; // 0x0x0
-		else if (size[0] <= 32)
+		if (size[0] <= 32)
 		{
 			if (size[2] < 54) // pick the nearest of 36 or 72
 				hull = &cmodel->brushq1.hulls[3]; // 32x32x36
@@ -3842,9 +3867,7 @@ static void Mod_Q1BSP_RoundUpToHullSize(model_t *cmodel, const vec3_t inmins, co
 	}
 	else
 	{
-		if (size[0] < 3)
-			hull = &cmodel->brushq1.hulls[0]; // 0x0x0
-		else if (size[0] <= 32)
+		if (size[0] <= 32)
 			hull = &cmodel->brushq1.hulls[1]; // 32x32x56
 		else
 			hull = &cmodel->brushq1.hulls[2]; // 64x64x88
@@ -3887,7 +3910,8 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	hullinfo_t hullinfo;
 	int totalstylesurfaces, totalstyles, stylecounts[256], remapstyles[256];
 	model_brush_lightstyleinfo_t styleinfo[256];
-	unsigned char *datapointer;
+	int *datapointer;
+	model_brush_lightstyleinfo_t *lsidatapointer;
 	sizebuf_t sb;
 
 	MSG_InitReadBuffer(&sb, (unsigned char *)buffer, (unsigned char *)bufferend - (unsigned char *)buffer);
@@ -4008,7 +4032,7 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	mod->brushq1.num_compressedpvs = 0;
 
 	Mod_Q1BSP_MakeHull0();
-	if (mod_bsp_portalize.integer)
+	if (mod_bsp_portalize.integer && cls.state != ca_dedicated)
 		Mod_BSP_MakePortals();
 
 	mod->numframes = 2;		// regular and alternate animation
@@ -4049,8 +4073,11 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 				totalstylesurfaces += stylecounts[k];
 		}
 	}
-	datapointer = (unsigned char *)Mem_Alloc(mod->mempool, mod->num_surfaces * sizeof(int) + totalstyles * sizeof(model_brush_lightstyleinfo_t) + totalstylesurfaces * sizeof(int *));
-	mod->modelsurfaces_sorted = (int*)datapointer;datapointer += mod->num_surfaces * sizeof(int);
+	// bones_was_here: using a separate allocation for model_brush_lightstyleinfo_t
+	// because on a 64-bit machine it no longer has the same alignment requirement as int.
+	lsidatapointer = Mem_AllocType(mod->mempool, model_brush_lightstyleinfo_t, totalstyles * sizeof(model_brush_lightstyleinfo_t));
+	datapointer = Mem_AllocType(mod->mempool, int, mod->num_surfaces * sizeof(int) + totalstylesurfaces * sizeof(int));
+	mod->modelsurfaces_sorted = datapointer;datapointer += mod->num_surfaces;
 	for (i = 0;i < mod->brush.numsubmodels;i++)
 	{
 		// LadyHavoc: this code was originally at the end of this loop, but
@@ -4065,7 +4092,7 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 			// copy the base model to this one
 			*mod = *loadmodel;
 			// rename the clone back to its proper name
-			strlcpy(mod->name, name, sizeof(mod->name));
+			dp_strlcpy(mod->name, name, sizeof(mod->name));
 			mod->brush.parentmodel = loadmodel;
 			// textures and memory belong to the main model
 			mod->texturepool = NULL;
@@ -4142,7 +4169,7 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 					styleinfo[mod->brushq1.num_lightstyles].style = k;
 					styleinfo[mod->brushq1.num_lightstyles].value = 0;
 					styleinfo[mod->brushq1.num_lightstyles].numsurfaces = 0;
-					styleinfo[mod->brushq1.num_lightstyles].surfacelist = (int *)datapointer;datapointer += stylecounts[k] * sizeof(int);
+					styleinfo[mod->brushq1.num_lightstyles].surfacelist = datapointer;datapointer += stylecounts[k];
 					remapstyles[k] = mod->brushq1.num_lightstyles;
 					mod->brushq1.num_lightstyles++;
 				}
@@ -4159,7 +4186,7 @@ void Mod_Q1BSP_Load(model_t *mod, void *buffer, void *bufferend)
 					}
 				}
 			}
-			mod->brushq1.data_lightstyleinfo = (model_brush_lightstyleinfo_t *)datapointer;datapointer += mod->brushq1.num_lightstyles * sizeof(model_brush_lightstyleinfo_t);
+			mod->brushq1.data_lightstyleinfo = lsidatapointer;lsidatapointer += mod->brushq1.num_lightstyles;
 			memcpy(mod->brushq1.data_lightstyleinfo, styleinfo, mod->brushq1.num_lightstyles * sizeof(model_brush_lightstyleinfo_t));
 		}
 		else
@@ -4824,7 +4851,8 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	msurface_t *surface;
 	int totalstylesurfaces, totalstyles, stylecounts[256], remapstyles[256];
 	model_brush_lightstyleinfo_t styleinfo[256];
-	unsigned char *datapointer;
+	int *datapointer;
+	model_brush_lightstyleinfo_t *lsidatapointer;
 	sizebuf_t sb;
 
 	MSG_InitReadBuffer(&sb, (unsigned char *)buffer, (unsigned char *)bufferend - (unsigned char *)buffer);
@@ -4939,7 +4967,7 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	mod->brushq1.num_compressedpvs = 0;
 
 	// the MakePortals code works fine on the q2bsp data as well
-	if (mod_bsp_portalize.integer)
+	if (mod_bsp_portalize.integer && cls.state != ca_dedicated)
 		Mod_BSP_MakePortals();
 
 	mod->numframes = 0;		// q2bsp animations are kind of special, frame is unbounded...
@@ -4966,8 +4994,11 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 				totalstylesurfaces += stylecounts[k];
 		}
 	}
-	datapointer = (unsigned char *)Mem_Alloc(mod->mempool, mod->num_surfaces * sizeof(int) + totalstyles * sizeof(model_brush_lightstyleinfo_t) + totalstylesurfaces * sizeof(int *));
-	mod->modelsurfaces_sorted = (int*)datapointer; datapointer += mod->num_surfaces * sizeof(int);
+	// bones_was_here: using a separate allocation for model_brush_lightstyleinfo_t
+	// because on a 64-bit machine it no longer has the same alignment requirement as int.
+	lsidatapointer = Mem_AllocType(mod->mempool, model_brush_lightstyleinfo_t, totalstyles * sizeof(model_brush_lightstyleinfo_t));
+	datapointer = Mem_AllocType(mod->mempool, int, mod->num_surfaces * sizeof(int) + totalstylesurfaces * sizeof(int));
+	mod->modelsurfaces_sorted = datapointer; datapointer += mod->num_surfaces;
 	// set up the world model, then on each submodel copy from the world model
 	// and set up the submodel with the respective model info.
 	mod = loadmodel;
@@ -4984,7 +5015,7 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 			// copy the base model to this one
 			*mod = *loadmodel;
 			// rename the clone back to its proper name
-			strlcpy(mod->name, name, sizeof(mod->name));
+			dp_strlcpy(mod->name, name, sizeof(mod->name));
 			mod->brush.parentmodel = loadmodel;
 			// textures and memory belong to the main model
 			mod->texturepool = NULL;
@@ -5070,7 +5101,7 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 					styleinfo[mod->brushq1.num_lightstyles].style = k;
 					styleinfo[mod->brushq1.num_lightstyles].value = 0;
 					styleinfo[mod->brushq1.num_lightstyles].numsurfaces = 0;
-					styleinfo[mod->brushq1.num_lightstyles].surfacelist = (int *)datapointer;datapointer += stylecounts[k] * sizeof(int);
+					styleinfo[mod->brushq1.num_lightstyles].surfacelist = datapointer;datapointer += stylecounts[k];
 					remapstyles[k] = mod->brushq1.num_lightstyles;
 					mod->brushq1.num_lightstyles++;
 				}
@@ -5087,7 +5118,7 @@ static void Mod_Q2BSP_Load(model_t *mod, void *buffer, void *bufferend)
 					}
 				}
 			}
-			mod->brushq1.data_lightstyleinfo = (model_brush_lightstyleinfo_t *)datapointer;datapointer += mod->brushq1.num_lightstyles * sizeof(model_brush_lightstyleinfo_t);
+			mod->brushq1.data_lightstyleinfo = lsidatapointer;lsidatapointer += mod->brushq1.num_lightstyles;
 			memcpy(mod->brushq1.data_lightstyleinfo, styleinfo, mod->brushq1.num_lightstyles * sizeof(model_brush_lightstyleinfo_t));
 		}
 		else
@@ -5143,14 +5174,14 @@ static void Mod_Q3BSP_LoadEntities(lump_t *l)
 			if (com_token[0] == '}')
 				break; // end of worldspawn
 			if (com_token[0] == '_')
-				strlcpy(key, com_token + 1, sizeof(key));
+				dp_strlcpy(key, com_token + 1, sizeof(key));
 			else
-				strlcpy(key, com_token, sizeof(key));
+				dp_strlcpy(key, com_token, sizeof(key));
 			while (key[strlen(key)-1] == ' ') // remove trailing spaces
 				key[strlen(key)-1] = 0;
 			if (!COM_ParseToken_Simple(&data, false, false, true))
 				break; // error
-			strlcpy(value, com_token, sizeof(value));
+			dp_strlcpy(value, com_token, sizeof(value));
 			if (!strcasecmp("gridsize", key)) // this one is case insensitive to 100% match q3map2
 			{
 #if _MSC_VER >= 1400
@@ -5368,7 +5399,7 @@ static void Mod_Q3BSP_LoadEffects(lump_t *l)
 
 	for (i = 0;i < count;i++, in++, out++)
 	{
-		strlcpy (out->shadername, in->shadername, sizeof (out->shadername));
+		dp_strlcpy (out->shadername, in->shadername, sizeof (out->shadername));
 		n = LittleLong(in->brushindex);
 		if (n >= loadmodel->brush.num_brushes)
 		{
@@ -5893,7 +5924,7 @@ static void Mod_Q3BSP_LoadFaces(lump_t *l)
 		case Q3FACETYPE_PATCH:
 			patchsize[0] = LittleLong(in->specific.patch.patchsize[0]);
 			patchsize[1] = LittleLong(in->specific.patch.patchsize[1]);
-			if (numvertices != (patchsize[0] * patchsize[1]) || patchsize[0] < 3 || patchsize[1] < 3 || !(patchsize[0] & 1) || !(patchsize[1] & 1) || patchsize[0] * patchsize[1] >= min(r_subdivisions_maxvertices.integer, r_subdivisions_collision_maxvertices.integer))
+			if (numvertices != (patchsize[0] * patchsize[1]) || patchsize[0] < 3 || patchsize[1] < 3 || !(patchsize[0] & 1) || !(patchsize[1] & 1) || patchsize[0] * patchsize[1] >= (cls.state == ca_dedicated ? mod_q3bsp_curves_subdivisions_maxvertices.integer : min(r_subdivisions_maxvertices.integer, mod_q3bsp_curves_subdivisions_maxvertices.integer)))
 			{
 				Con_Printf("Mod_Q3BSP_LoadFaces: face #%i (texture \"%s\"): invalid patchsize %ix%i\n", i, out->texture->name, patchsize[0], patchsize[1]);
 				continue;
@@ -5912,11 +5943,11 @@ static void Mod_Q3BSP_LoadFaces(lump_t *l)
 
 			// lower quality collision patches! Same procedure as before, but different cvars
 			// convert patch to Q3FACETYPE_MESH
-			cxtess = Q3PatchTesselationOnX(patchsize[0], patchsize[1], 3, originalvertex3f, r_subdivisions_collision_tolerance.value);
-			cytess = Q3PatchTesselationOnY(patchsize[0], patchsize[1], 3, originalvertex3f, r_subdivisions_collision_tolerance.value);
+			cxtess = Q3PatchTesselationOnX(patchsize[0], patchsize[1], 3, originalvertex3f, mod_q3bsp_curves_subdivisions_tolerance.value);
+			cytess = Q3PatchTesselationOnY(patchsize[0], patchsize[1], 3, originalvertex3f, mod_q3bsp_curves_subdivisions_tolerance.value);
 			// bound to user settings
-			cxtess = bound(r_subdivisions_collision_mintess.integer, cxtess, r_subdivisions_collision_maxtess.integer);
-			cytess = bound(r_subdivisions_collision_mintess.integer, cytess, r_subdivisions_collision_maxtess.integer);
+			cxtess = bound(mod_q3bsp_curves_subdivisions_mintess.integer, cxtess, mod_q3bsp_curves_subdivisions_maxtess.integer);
+			cytess = bound(mod_q3bsp_curves_subdivisions_mintess.integer, cytess, mod_q3bsp_curves_subdivisions_maxtess.integer);
 			// bound to sanity settings
 			cxtess = bound(0, cxtess, 1024);
 			cytess = bound(0, cytess, 1024);
@@ -6337,8 +6368,9 @@ static void Mod_Q3BSP_LoadLeafs(lump_t *l)
 		for (j = 0;j < 3;j++)
 		{
 			// yes the mins/maxs are ints
-			out->mins[j] = LittleLong(in->mins[j]) - 1;
-			out->maxs[j] = LittleLong(in->maxs[j]) + 1;
+			// bones_was_here: the cast prevents signed underflow with poon-wood.bsp
+			out->mins[j] = (vec_t)LittleLong(in->mins[j]) - 1;
+			out->maxs[j] = (vec_t)LittleLong(in->maxs[j]) + 1;
 		}
 		n = LittleLong(in->firstleafface);
 		c = LittleLong(in->numleaffaces);
@@ -6783,19 +6815,23 @@ void Mod_CollisionBIH_TracePoint(model_t *model, const frameblend_t *frameblend,
 	{
 		nodenum = nodestack[--nodestackpos];
 		node = bih->nodes + nodenum;
+		assert(node->type <= BIH_UNORDERED);
 #if 1
 		if (!BoxesOverlap(start, start, node->mins, node->maxs))
 			continue;
 #endif
-		if (node->type <= BIH_SPLITZ && nodestackpos+2 <= 1024)
+		if (node->type != BIH_UNORDERED)
 		{
+			if(nodestackpos > 1024 - 2)
+				//Out of stack
+				continue;
 			axis = node->type - BIH_SPLITX;
 			if (start[axis] >= node->frontmin)
 				nodestack[nodestackpos++] = node->front;
 			if (start[axis] <= node->backmax)
 				nodestack[nodestackpos++] = node->back;
 		}
-		else if (node->type == BIH_UNORDERED)
+		else
 		{
 			for (axis = 0;axis < BIH_MAXUNORDEREDCHILDREN && node->children[axis] >= 0;axis++)
 			{
@@ -6872,37 +6908,130 @@ static void Mod_CollisionBIH_TraceLineShared(model_t *model, const frameblend_t 
 		sweepnodemaxs[2] = max(nodestart[2], nodeend[2]) + 1;
 		if (!BoxesOverlap(sweepnodemins, sweepnodemaxs, node->mins, node->maxs) && !collision_bih_fullrecursion.integer)
 			continue;
-		if (node->type <= BIH_SPLITZ && nodestackpos+2 <= 1024)
+		assert(node->type <= BIH_UNORDERED);
+		if (node->type != BIH_UNORDERED)
 		{
+			if(nodestackpos > 1024 - 2)
+				//Out of stack
+				continue;
 			// recurse children of the split
 			axis = node->type - BIH_SPLITX;
 			d1 = node->backmax - nodestart[axis];
 			d2 = node->backmax - nodeend[axis];
 			d3 = nodestart[axis] - node->frontmin;
 			d4 = nodeend[axis] - node->frontmin;
+			f = 1.f / (nodeend[axis] - nodestart[axis]);
 			if (collision_bih_fullrecursion.integer)
 				d1 = d2 = d3 = d4 = 1; // force full recursion
 			switch((d1 < 0) | ((d2 < 0) << 1) | ((d3 < 0) << 2) | ((d4 < 0) << 3))
 			{
-			case  0: /* >>>> */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  1: /* <>>> */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  2: /* ><>> */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  3: /* <<>> */                                                                                                                                                                                                                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  4: /* >><> */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  5: /* <><> */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  6: /* ><<> */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  7: /* <<<> */                                                                                                                                                                                                  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  8: /* >>>< */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  9: /* <>>< */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 10: /* ><>< */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 11: /* <<>< */                                                                                                                                                                                                  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 12: /* >><< */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 13: /* <><< */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 14: /* ><<< */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 15: /* <<<< */                                                                                                                                                                                                                                                                                                                                                                                                   break;
+			case  0: /* >>>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  1: /* <>>> */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  2: /* ><>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  3: /* <<>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  4: /* >><> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  5: /* <><> */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  6: /* ><<> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  7: /* <<<> */
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  8: /* >>>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  9: /* <>>< */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 10: /* ><>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 11: /* <<>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 12: /* >><< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 13: /* <><< */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 14: /* ><<< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 15: /* <<<< */
+				break;
 			}
 		}
-		else if (node->type == BIH_UNORDERED)
+		else
 		{
 			// calculate sweep bounds for this node
 			// copy node bounds into local variables
@@ -6995,8 +7124,10 @@ void Mod_CollisionBIH_TraceBrush(model_t *model, const frameblend_t *frameblend,
 	trace->skipmaterialflagsmask = skipmaterialflagsmask;
 
 	// calculate tracebox-like parameters for efficient culling
-	VectorMAM(0.5f, thisbrush_start->mins, 0.5f, thisbrush_start->maxs, start);
-	VectorMAM(0.5f, thisbrush_end->mins, 0.5f, thisbrush_end->maxs, end);
+	VectorAdd(thisbrush_start->mins, thisbrush_start->maxs, start);
+	VectorAdd(thisbrush_end->mins, thisbrush_end->maxs, end);
+	VectorM(0.5f, start, start);
+	VectorM(0.5f, end, end);
 	VectorSubtract(thisbrush_start->mins, start, startmins);
 	VectorSubtract(thisbrush_start->maxs, start, startmaxs);
 	VectorSubtract(thisbrush_end->mins, end, endmins);
@@ -7030,35 +7161,128 @@ void Mod_CollisionBIH_TraceBrush(model_t *model, const frameblend_t *frameblend,
 		sweepnodemaxs[2] = max(nodestart[2], nodeend[2]) + maxs[2] + 1;
 		if (!BoxesOverlap(sweepnodemins, sweepnodemaxs, node->mins, node->maxs))
 			continue;
-		if (node->type <= BIH_SPLITZ && nodestackpos+2 <= 1024)
+		assert(node->type <= BIH_UNORDERED);
+		if (node->type != BIH_UNORDERED)
 		{
+			if(nodestackpos > 1024 - 2)
+				//Out of stack
+				continue;
 			// recurse children of the split
 			axis = node->type - BIH_SPLITX;
-			d1 = node->backmax - nodestart[axis] - mins[axis];
-			d2 = node->backmax - nodeend[axis] - mins[axis];
-			d3 = nodestart[axis] - node->frontmin + maxs[axis];
-			d4 = nodeend[axis] - node->frontmin + maxs[axis];
+			d1 = node->backmax - mins[axis] - nodestart[axis];
+			d2 = node->backmax - mins[axis] - nodeend[axis];
+			d3 = nodestart[axis] - (node->frontmin - maxs[axis]);
+			d4 = nodeend[axis] - (node->frontmin - maxs[axis]);
+			f = 1.f / (nodeend[axis] - nodestart[axis]);
 			switch((d1 < 0) | ((d2 < 0) << 1) | ((d3 < 0) << 2) | ((d4 < 0) << 3))
 			{
-			case  0: /* >>>> */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  1: /* <>>> */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  2: /* ><>> */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  3: /* <<>> */                                                                                                                                                                                                                      VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  4: /* >><> */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  5: /* <><> */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  6: /* ><<> */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  7: /* <<<> */                                                                                                                                                                                                  f = d3 / (d3 - d4); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  8: /* >>>< */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case  9: /* <>>< */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 10: /* ><>< */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 11: /* <<>< */                                                                                                                                                                                                  f = d3 / (d3 - d4); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->front; break;
-			case 12: /* >><< */                     VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 13: /* <><< */ f = d1 / (d1 - d2); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos]); VectorCopy(              nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 14: /* ><<< */ f = d1 / (d1 - d2); VectorCopy(nodestart,             nodestackline[nodestackpos]); VectorLerp(nodestart, f, nodeend, nodestackline[nodestackpos] + 3); nodestack[nodestackpos++] = node->back;                                                                                                                                                                                                   break;
-			case 15: /* <<<< */                                                                                                                                                                                                                                                                                                                                                                                                   break;
+			case  0: /* >>>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  1: /* <>>> */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  2: /* ><>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  3: /* <<>> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  4: /* >><> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  5: /* <><> */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  6: /* ><<> */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  7: /* <<<> */
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  8: /* >>>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case  9: /* <>>< */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 10: /* ><>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 11: /* <<>< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, -d3 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->front;
+				break;
+			case 12: /* >><< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 13: /* <><< */
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos]);
+				VectorCopy(nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 14: /* ><<< */
+				VectorCopy(nodestart, nodestackline[nodestackpos]);
+				VectorLerp(nodestart, d1 * f, nodeend, nodestackline[nodestackpos] + 3);
+				nodestack[nodestackpos++] = node->back;
+				break;
+			case 15: /* <<<< */
+				break;
 			}
 		}
-		else if (node->type == BIH_UNORDERED)
+		else
 		{
 			// calculate sweep bounds for this node
 			// copy node bounds into local variables and expand to get Minkowski Sum of the two shapes
@@ -7520,7 +7744,7 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 	loadmodel->brush.numsubmodels = loadmodel->brushq3.num_models;
 
 	// the MakePortals code works fine on the q3bsp data as well
-	if (mod_bsp_portalize.integer)
+	if (mod_bsp_portalize.integer && cls.state != ca_dedicated)
 		Mod_BSP_MakePortals();
 
 	// FIXME: shader alpha should replace r_wateralpha support in q3bsp
@@ -7545,7 +7769,7 @@ static void Mod_Q3BSP_Load(model_t *mod, void *buffer, void *bufferend)
 			// copy the base model to this one
 			*mod = *loadmodel;
 			// rename the clone back to its proper name
-			strlcpy(mod->name, name, sizeof(mod->name));
+			dp_strlcpy(mod->name, name, sizeof(mod->name));
 			mod->brush.parentmodel = loadmodel;
 			// textures and memory belong to the main model
 			mod->texturepool = NULL;
@@ -8390,7 +8614,7 @@ void Mod_OBJ_Load(model_t *mod, void *buffer, void *bufferend)
 					texturenames = (char *)Mem_Realloc(loadmodel->mempool, texturenames, maxtextures * MAX_QPATH);
 				}
 				textureindex = numtextures++;
-				strlcpy(texturenames + textureindex*MAX_QPATH, loadmodel->name, MAX_QPATH);
+				dp_strlcpy(texturenames + textureindex*MAX_QPATH, loadmodel->name, MAX_QPATH);
 			}
 			for (j = 1;j < argc;j++)
 			{
@@ -8483,7 +8707,7 @@ void Mod_OBJ_Load(model_t *mod, void *buffer, void *bufferend)
 					texturenames = (char *)Mem_Realloc(loadmodel->mempool, texturenames, maxtextures * MAX_QPATH);
 				}
 				textureindex = numtextures++;
-				strlcpy(texturenames + textureindex*MAX_QPATH, argv[1], MAX_QPATH);
+				dp_strlcpy(texturenames + textureindex*MAX_QPATH, argv[1], MAX_QPATH);
 			}
 		}
 	}
@@ -8693,7 +8917,7 @@ void Mod_OBJ_Load(model_t *mod, void *buffer, void *bufferend)
 			// copy the base model to this one
 			*mod = *loadmodel;
 			// rename the clone back to its proper name
-			strlcpy(mod->name, name, sizeof(mod->name));
+			dp_strlcpy(mod->name, name, sizeof(mod->name));
 			mod->brush.parentmodel = loadmodel;
 			// textures and memory belong to the main model
 			mod->texturepool = NULL;

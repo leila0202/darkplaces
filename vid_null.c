@@ -29,44 +29,15 @@ void VID_Shutdown(void)
 {
 }
 
-#ifndef WIN32
-static void signal_handler(int sig)
-{
-	Con_Printf("Received signal %d, exiting...\n", sig);
-	Sys_Quit(1);
-}
-
-static void InitSig(void)
-{
-	signal(SIGHUP, signal_handler);
-	signal(SIGINT, signal_handler);
-	signal(SIGQUIT, signal_handler);
-	signal(SIGILL, signal_handler);
-	signal(SIGTRAP, signal_handler);
-	signal(SIGIOT, signal_handler);
-	signal(SIGBUS, signal_handler);
-	signal(SIGFPE, signal_handler);
-	signal(SIGSEGV, signal_handler);
-	signal(SIGTERM, signal_handler);
-}
-#endif
-
-void VID_SetMouse (qbool fullscreengrab, qbool relative, qbool hidecursor)
-{
-}
-
 void VID_Finish (void)
 {
 }
 
 void VID_Init(void)
 {
-#ifndef WIN32
-	InitSig(); // trap evil signals
-#endif
 }
 
-qbool VID_InitMode(viddef_mode_t *mode)
+qbool VID_InitMode(const viddef_mode_t *mode)
 {
 	return false;
 }
@@ -76,7 +47,7 @@ void *GL_GetProcAddress(const char *name)
 	return NULL;
 }
 
-void Sys_SendKeyEvents(void)
+void Sys_SDL_HandleEvents(void)
 {
 }
 
@@ -86,11 +57,6 @@ void VID_BuildJoyState(vid_joystate_t *joystate)
 
 void IN_Move(void)
 {
-}
-
-vid_mode_t *VID_GetDesktopMode(void)
-{
-	return NULL;
 }
 
 size_t VID_ListModes(vid_mode_t *modes, size_t maxcount)

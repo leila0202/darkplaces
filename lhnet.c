@@ -2,13 +2,16 @@
 // Written by Ashley Rose Hale (LadyHavoc) 2003-06-15 and placed into public domain.
 
 #ifdef WIN32
-#ifdef _MSC_VER
-#pragma comment(lib, "ws2_32.lib")
-#endif
+# ifdef _MSC_VER
+#  pragma comment(lib, "ws2_32.lib")
+# endif
 # ifndef NOSUPPORTIPV6
 // Windows XP or higher is required for getaddrinfo, but the inclusion of wspiapi provides fallbacks for older versions
-# define _WIN32_WINNT 0x0501
+#  define _WIN32_WINNT 0x0501
 # endif
+// To increase FD_SETSIZE (defaults to 64 on Windows)
+// it must be defined before the first inclusion of winsock2.h
+# define FD_SETSIZE 1024 // Matches Linux and BSD defaults
 # include <winsock2.h>
 # include <ws2tcpip.h>
 # ifdef USE_WSPIAPI_H
@@ -550,8 +553,7 @@ int LHNETADDRESS_ToString(const lhnetaddress_t *vaddress, char *string, int stri
 		{
 			if (stringbuffersize >= 12)
 			{
-				dpsnprintf(string, stringbuffersize, "local:%d", address->port);
-				return 1;
+				return dpsnprintf(string, stringbuffersize, "local:%d", address->port);
 			}
 		}
 		else
@@ -559,7 +561,7 @@ int LHNETADDRESS_ToString(const lhnetaddress_t *vaddress, char *string, int stri
 			if (stringbuffersize >= 6)
 			{
 				memcpy(string, "local", 6);
-				return 1;
+				return 5;
 			}
 		}
 		break;
@@ -569,16 +571,14 @@ int LHNETADDRESS_ToString(const lhnetaddress_t *vaddress, char *string, int stri
 		{
 			if (stringbuffersize >= 22)
 			{
-				dpsnprintf(string, stringbuffersize, "%d.%d.%d.%d:%d", a[0], a[1], a[2], a[3], address->port);
-				return 1;
+				return dpsnprintf(string, stringbuffersize, "%d.%d.%d.%d:%d", a[0], a[1], a[2], a[3], address->port);
 			}
 		}
 		else
 		{
 			if (stringbuffersize >= 16)
 			{
-				dpsnprintf(string, stringbuffersize, "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
-				return 1;
+				return dpsnprintf(string, stringbuffersize, "%d.%d.%d.%d", a[0], a[1], a[2], a[3]);
 			}
 		}
 		break;
@@ -589,30 +589,20 @@ int LHNETADDRESS_ToString(const lhnetaddress_t *vaddress, char *string, int stri
 		{
 			if (stringbuffersize >= 88)
 			{
-				dpsnprintf(string, stringbuffersize, "[%x:%x:%x:%x:%x:%x:%x:%x]:%d", a[0] * 256 + a[1], a[2] * 256 + a[3], a[4] * 256 + a[5], a[6] * 256 + a[7], a[8] * 256 + a[9], a[10] * 256 + a[11], a[12] * 256 + a[13], a[14] * 256 + a[15], address->port);
-				return 1;
+				return dpsnprintf(string, stringbuffersize, "[%x:%x:%x:%x:%x:%x:%x:%x]:%d", a[0] * 256 + a[1], a[2] * 256 + a[3], a[4] * 256 + a[5], a[6] * 256 + a[7], a[8] * 256 + a[9], a[10] * 256 + a[11], a[12] * 256 + a[13], a[14] * 256 + a[15], address->port);
 			}
 		}
 		else
 		{
 			if (stringbuffersize >= 80)
 			{
-				dpsnprintf(string, stringbuffersize, "%x:%x:%x:%x:%x:%x:%x:%x", a[0] * 256 + a[1], a[2] * 256 + a[3], a[4] * 256 + a[5], a[6] * 256 + a[7], a[8] * 256 + a[9], a[10] * 256 + a[11], a[12] * 256 + a[13], a[14] * 256 + a[15]);
-				return 1;
+				return dpsnprintf(string, stringbuffersize, "%x:%x:%x:%x:%x:%x:%x:%x", a[0] * 256 + a[1], a[2] * 256 + a[3], a[4] * 256 + a[5], a[6] * 256 + a[7], a[8] * 256 + a[9], a[10] * 256 + a[11], a[12] * 256 + a[13], a[14] * 256 + a[15]);
 			}
 		}
 		break;
 #endif
 	}
 	return 0;
-}
-
-int LHNETADDRESS_GetAddressType(const lhnetaddress_t *address)
-{
-	if (address)
-		return address->addresstype;
-	else
-		return LHNETADDRESSTYPE_NONE;
 }
 
 const char *LHNETADDRESS_GetInterfaceName(const lhnetaddress_t *vaddress, char *ifname, size_t ifnamelength)
@@ -724,7 +714,7 @@ typedef struct lhnetpacket_s
 lhnetpacket_t;
 
 static int lhnet_active;
-static lhnetsocket_t lhnet_socketlist;
+lhnetsocket_t lhnet_socketlist;
 static lhnetpacket_t lhnet_packetlist;
 static int lhnet_default_dscp = 0;
 #ifdef WIN32
@@ -836,36 +826,6 @@ static const char *LHNETPRIVATE_StrError(void)
 	}
 #else
 	return strerror(errno);
-#endif
-}
-
-void LHNET_SleepUntilPacket_Microseconds(int microseconds)
-{
-#ifdef FD_SET
-	fd_set fdreadset;
-	struct timeval tv;
-	int lastfd;
-	lhnetsocket_t *s;
-	FD_ZERO(&fdreadset);
-	lastfd = 0;
-	List_For_Each_Entry(s, &lhnet_socketlist.list, lhnetsocket_t, list)
-	{
-		if (s->address.addresstype == LHNETADDRESSTYPE_INET4 || s->address.addresstype == LHNETADDRESSTYPE_INET6)
-		{
-			if (lastfd < s->inetsocket)
-				lastfd = s->inetsocket;
-#if defined(WIN32) && !defined(_MSC_VER)
-			FD_SET((int)s->inetsocket, &fdreadset);
-#else
-			FD_SET((unsigned int)s->inetsocket, &fdreadset);
-#endif
-		}
-	}
-	tv.tv_sec = microseconds / 1000000;
-	tv.tv_usec = microseconds % 1000000;
-	select(lastfd + 1, &fdreadset, NULL, NULL, &tv);
-#else
-	Sys_Sleep(microseconds);
 #endif
 }
 
