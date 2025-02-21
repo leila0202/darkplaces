@@ -20,17 +20,6 @@ on:
     - cron: '37 8 * * 1'
 
 jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    container:
-      image: debian:latest
-    steps:
-      - name: Install dependencies
-        run: |
-          apt update
-          apt install --yes build-essential git libjpeg-dev libsdl2-dev libcurl4-openssl-dev libpng-dev libfreetype-dev libvorbis-dev
-          chown -R root:root
-          git describe --always
   analyze:
     name: Analyze (${{ matrix.language }})
     # Runner size impacts CodeQL analysis time. To learn more, please see:
@@ -39,6 +28,8 @@ jobs:
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
     runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    container:
+      image: debian:latest
     permissions:
       # required for all workflows
       security-events: write
@@ -67,9 +58,19 @@ jobs:
         # If you are analyzing a compiled language, you can modify the 'build-mode' for that language to customize how
         # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
     steps:
+
+    - name: Install dependencies
+      run: |
+          apt update
+          apt install --yes build-essential git libjpeg-dev libsdl2-dev libcurl4-openssl-dev libpng-dev libfreetype-dev libvorbis-dev
+          
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Prepare Compile
+      run: |
+          chown -R root:root .
+          git describe --always
     # Add any setup steps before running the `github/codeql-action/init` action.
     # This includes steps like installing compilers or runtimes (`actions/setup-node`
     # or others). This is typically only required for manual builds.
